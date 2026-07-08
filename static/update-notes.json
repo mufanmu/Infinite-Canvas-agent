@@ -13,6 +13,10 @@
     {
       "type": "feature",
       "text": "修复智能画布匹配图片比例后，1k/2k/4k尺寸没有自动适配bug"
+    },
+    {
+      "type": "feature",
+      "text": "modelscope更新源暂不可用"
     }
   ]
 }
