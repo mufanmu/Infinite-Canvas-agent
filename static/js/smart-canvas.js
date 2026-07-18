@@ -17416,6 +17416,13 @@ async function runAgentGenerations(assistantMsg, userMsg){
     await Promise.all(gens.map(async gen => {
         gen.status = 'running';
         renderAgentMessages();
+        // 先创建占位节点（按照图片尺寸来）
+        const placeholderNode = createImageNodeAt(agentFindEmptyPosition(gen.count), []);
+        if(placeholderNode){
+            placeholderNode.pending = gen.count;
+            placeholderNode.title = gen.prompt?.slice(0, 30) || '生成中...';
+            render();
+        }
         try {
             let refs = [];
             if(gen.use_last_outputs) refs = refs.concat(lastResults);
@@ -17433,25 +17440,32 @@ async function runAgentGenerations(assistantMsg, userMsg){
             }).filter(i => i.url);
             gen.results = urls;
             gen.status = 'done';
-            if(urls.length){
+            if(urls.length && placeholderNode){
+                // 生成完成后，更新占位节点为实际图片
                 undoSuppressed = true;
-                const node = createImageNodeAt(agentFindEmptyPosition(urls.length), urls.map(u => ({...u})));
+                placeholderNode.images = urls.map(u => ({...u}));
+                placeholderNode.pending = 0;
+                placeholderNode.title = urls.length > 1 ? 'Group' : 'Image';
+                selectedId = placeholderNode.id;
                 undoSuppressed = false;
-                if(node){
-                    selectedId = node.id;
-                    // 保存节点 ID 到 results，用于点击跳转
-                    gen.results = gen.results.map((r, i) => ({...r, nodeId: node.id, nodeX: Number(node.x) || 0, nodeY: Number(node.y) || 0}));
-                }
+                // 保存节点 ID 到 results，用于点击跳转
+                gen.results = gen.results.map((r, i) => ({...r, nodeId: placeholderNode.id, nodeX: Number(placeholderNode.x) || 0, nodeY: Number(placeholderNode.y) || 0}));
             }
         } catch(e) {
             gen.status = 'error';
             gen.error = String(e.message || e).slice(0, 200);
+            // 生成失败，删除占位节点
+            if(placeholderNode){
+                undoSuppressed = true;
+                nodes = nodes.filter(n => n.id !== placeholderNode.id);
+                undoSuppressed = false;
+            }
         }
         renderAgentMessages();
         saveAgentState();
+        render();
+        scheduleSave();
     }));
-    render();
-    scheduleSave();
 }
 function agentCanvasImages(){
     const items = [];
