@@ -1220,7 +1220,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-msg-thumbs img { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:9px; border:1px solid var(--line); cursor:pointer; display:block; }
 .agent-gen-card { width:250px; max-width:100%; border-radius:12px; border:1px solid var(--line); background:var(--card); padding:8px 10px; display:flex; flex-direction:column; gap:6px; }
 .agent-gen-prompt { font-size:10px; color:var(--muted); line-height:1.45; position:relative; }
-.agent-gen-prompt-collapsed { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.agent-gen-prompt-collapsed { display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; }
 .agent-gen-prompt-expanded { /* 展开后不截断 */ }
 .agent-gen-prompt-toggle { display:inline-block; margin-left:4px; padding:0 2px; border:none; background:none; color:var(--strong); font-size:10px; font-weight:700; cursor:pointer; vertical-align:baseline; white-space:nowrap; }
 .agent-gen-prompt-toggle:hover { text-decoration:underline; }
