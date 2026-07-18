@@ -17037,6 +17037,8 @@ function renderAgentMessages(){
             const nodeId = img.dataset.agentGenJump;
             const x = Number(img.dataset.agentGenX) || 0;
             const y = Number(img.dataset.agentGenY) || 0;
+            const url = img.src || '';
+            // 优先通过 nodeId 查找
             if(nodeId){
                 const node = (nodes || []).find(n => n.id === nodeId);
                 if(node){
@@ -17047,6 +17049,18 @@ function renderAgentMessages(){
                     return;
                 }
             }
+            // 没有 nodeId 时通过 url 查找节点
+            if(url){
+                const node = (nodes || []).find(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url && url.includes(img.url)));
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    agentCenterOnNode(node);
+                    render();
+                    return;
+                }
+            }
+            // 最后通过坐标跳转
             if(x || y) agentCenterOnPoint(x, y);
         };
     });
