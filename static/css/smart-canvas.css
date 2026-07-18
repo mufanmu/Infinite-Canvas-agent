@@ -1034,8 +1034,8 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .ref-line { display:none; }
 .ref-thumb { width:30px; height:30px; border-radius:8px; object-fit:cover; border:1px solid var(--line); background:var(--soft); flex:0 0 auto; }
 .ref-chip { height:20px; max-width:130px; padding:0 7px; border-radius:999px; display:inline-flex; align-items:center; background:var(--soft); border:1px solid var(--line); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.smart-minimap { position:absolute; right:22px; bottom:22px; z-index:8; width:190px; height:128px; border-radius:18px; background:var(--panel); border:1px solid var(--line); box-shadow:0 18px 44px var(--shadow); backdrop-filter:blur(16px); overflow:hidden; pointer-events:auto; cursor:crosshair; }
-.minimap-arrange-btn { position:absolute; right:22px; bottom:158px; z-index:9; height:32px; padding:0 10px; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:6px; color:var(--muted); background:var(--card); border:1px solid var(--line); box-shadow:0 10px 24px rgba(15,23,42,.13); opacity:0; pointer-events:none; cursor:pointer; font-size:11px; font-weight:850; transition:opacity .14s ease, color .14s ease, background .14s ease, transform .14s ease; }
+.smart-minimap { position:absolute; left:22px; bottom:22px; z-index:8; width:190px; height:128px; border-radius:18px; background:var(--panel); border:1px solid var(--line); box-shadow:0 18px 44px var(--shadow); backdrop-filter:blur(16px); overflow:hidden; pointer-events:auto; cursor:crosshair; }
+.minimap-arrange-btn { position:absolute; left:22px; bottom:158px; z-index:9; height:32px; padding:0 10px; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:6px; color:var(--muted); background:var(--card); border:1px solid var(--line); box-shadow:0 10px 24px rgba(15,23,42,.13); opacity:0; pointer-events:none; cursor:pointer; font-size:11px; font-weight:850; transition:opacity .14s ease, color .14s ease, background .14s ease, transform .14s ease; }
 .minimap-arrange-btn.visible { opacity:1; pointer-events:auto; }
 .minimap-arrange-btn:hover { color:var(--strong); background:var(--panel); transform:translateY(-1px); }
 .minimap-arrange-btn i,.minimap-arrange-btn svg { width:14px; height:14px; }
@@ -1219,11 +1219,29 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-toolbar-btn i,.agent-toolbar-btn svg { width:11px; height:11px; }
 .agent-toolbar-spacer { flex:1; }
 .agent-dropdown-panel { position:absolute; bottom:100%; left:0; min-width:200px; margin-bottom:6px; border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:60; padding:8px; display:flex; flex-direction:column; gap:6px; }
+.agent-dropdown-panel[hidden] { display:none; }
 .agent-dropdown-row { display:flex; align-items:center; gap:6px; }
 .agent-dropdown-row label { flex:0 0 36px; font-size:10px; font-weight:750; color:var(--muted); }
 .agent-dropdown-selects { flex:1; display:flex; gap:4px; }
 .agent-dropdown-selects select { flex:1; min-width:0; height:26px; border-radius:8px; border:1px solid var(--line); background:var(--soft); color:var(--text); font-size:10px; font-weight:650; padding:0 6px; outline:none; }
 .agent-dropdown-selects select:focus { border-color:var(--strong); }
+
+/* 参数面板（OneBox 风格） */
+.agent-params-panel { min-width:260px; padding:12px; gap:14px; }
+.agent-params-section { display:flex; flex-direction:column; gap:6px; }
+.agent-params-title { font-size:10px; font-weight:750; color:var(--muted); }
+.agent-quality-seg { display:flex; border-radius:10px; background:var(--soft); border:1px solid var(--line); overflow:hidden; }
+.agent-quality-btn { flex:1; height:30px; border:none; background:none; color:var(--muted); font-size:10.5px; font-weight:700; cursor:pointer; transition:background .14s ease, color .14s ease; }
+.agent-quality-btn.active { background:var(--card); color:var(--text); box-shadow:0 1px 4px rgba(15,23,42,.1); border-radius:9px; margin:1px; }
+.agent-quality-btn:not(.active):hover { color:var(--text); }
+.agent-size-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:5px; }
+.agent-size-btn { height:34px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:var(--muted); font-size:9.5px; font-weight:700; cursor:pointer; transition:border-color .14s ease, color .14s ease, background .14s ease; display:flex; align-items:center; justify-content:center; }
+.agent-size-btn:hover { border-color:var(--strong); color:var(--text); }
+.agent-size-btn.active { border-color:var(--strong); background:var(--soft); color:var(--text); }
+.agent-count-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:5px; }
+.agent-count-btn { height:30px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:var(--muted); font-size:9.5px; font-weight:700; cursor:pointer; transition:border-color .14s ease, color .14s ease, background .14s ease; }
+.agent-count-btn:hover { border-color:var(--strong); color:var(--text); }
+.agent-count-btn.active { border-color:var(--strong); background:var(--soft); color:var(--text); }
 .agent-send-btn { flex:0 0 auto; width:28px; height:28px; border-radius:9px; background:var(--strong); color:var(--strong-text); display:inline-flex; align-items:center; justify-content:center; border:none; cursor:pointer; }
 .agent-send-btn:disabled { opacity:.45; cursor:not-allowed; }
 .agent-send-btn i,.agent-send-btn svg { width:13px; height:13px; }
@@ -1238,6 +1256,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 
 /* @ 引用面板 */
 .agent-mention-panel { position:absolute; bottom:100%; left:0; right:0; max-height:240px; overflow-y:auto; border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:50; margin-bottom:4px; }
+.agent-mention-panel[hidden] { display:none; }
 .agent-mention-panel:empty { display:none; }
 .agent-mention-item { display:flex; align-items:center; gap:8px; padding:7px 10px; cursor:pointer; border:none; background:none; width:100%; text-align:left; }
 .agent-mention-item:hover,.agent-mention-item.active { background:var(--soft); }

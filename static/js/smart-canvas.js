@@ -16699,7 +16699,7 @@ let agentSaveTimer = null;
 let agentState = null;
 let agentMentionIdx = -1;
 function agentDefaultState(){
-    return {skills:[], attachments:[], messages:[], chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, autoContext:true, inputHeight:0};
+    return {skills:[], attachments:[], messages:[], chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, genQuality:'', autoContext:true, inputHeight:0};
 }
 function agentStorageKey(){ return AGENT_STORAGE_PREFIX + (canvasId || 'default'); }
 // 生图 provider 列表：与主画布的 imageProviders() 不同，这里不排除 modelscope/volcengine，
@@ -16761,6 +16761,10 @@ function agentRatioLabel(key){
     const map = {square:'1:1', portrait:'2:3', portrait43:'3:4', landscape43:'4:3', landscape:'3:2', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21'};
     return map[key] || key || '1:1';
 }
+function agentQualityLabel(q){
+    const map = {'':'自动', high:'高', medium:'中', low:'低'};
+    return map[q] || '自动';
+}
 function agentUpdateToolbarLabels(){
     const modelLabel = document.getElementById('agentModelLabel');
     const paramsLabel = document.getElementById('agentParamsLabel');
@@ -16773,15 +16777,14 @@ function agentUpdateToolbarLabels(){
         const ratio = agentRatioLabel(agentState.genRatio || 'square');
         const res = (agentState.genResolution || '1k').toUpperCase();
         const count = agentState.genCount || 1;
-        paramsLabel.textContent = `${ratio} · ${res} · ${count}张`;
+        const quality = agentState.genQuality || '';
+        const qLabel = quality ? ` · ${agentQualityLabel(quality)}` : '';
+        paramsLabel.textContent = `${ratio} · ${res} · ${count}张${qLabel}`;
     }
 }
 function agentMoveSelectsToDropdown(){
     const chatSelects = document.getElementById('agentChatSelects');
     const genSelects = document.getElementById('agentGenSelects');
-    const ratioSelect = document.getElementById('agentRatioSelect');
-    const resSelect = document.getElementById('agentResSelect');
-    const countSelect = document.getElementById('agentCountSelect');
     if(chatSelects && agentChatProvider && agentChatModel){
         chatSelects.appendChild(agentChatProvider);
         chatSelects.appendChild(agentChatModel);
@@ -16790,9 +16793,6 @@ function agentMoveSelectsToDropdown(){
         genSelects.appendChild(agentGenProvider);
         genSelects.appendChild(agentGenModel);
     }
-    if(ratioSelect && agentGenRatio) ratioSelect.appendChild(agentGenRatio);
-    if(resSelect && agentGenResolution) resSelect.appendChild(agentGenResolution);
-    if(countSelect && agentGenCount) countSelect.appendChild(agentGenCount);
     // 确保下拉面板初始隐藏
     const modelPanel = document.getElementById('agentModelPanel');
     const paramsPanel = document.getElementById('agentParamsPanel');
@@ -16830,10 +16830,31 @@ function renderAgentModelSelectors(){
             agentGenModel.innerHTML = '<option value="">-</option>';
         }
     }
-    if(agentGenRatio) agentGenRatio.value = agentState.genRatio || 'square';
-    if(agentGenResolution) agentGenResolution.value = agentState.genResolution || '1k';
-    if(agentGenCount) agentGenCount.value = String(agentState.genCount || 1);
+    agentSyncParamsPanel();
     agentUpdateToolbarLabels();
+}
+function agentSyncParamsPanel(){
+    if(!agentState) return;
+    const ratio = agentState.genRatio || 'square';
+    const res = agentState.genResolution || '1k';
+    const count = agentState.genCount || 1;
+    const quality = agentState.genQuality || '';
+    // 同步 Size 网格
+    document.querySelectorAll('.agent-size-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.ratio === ratio && btn.dataset.res === res);
+    });
+    // 同步数量网格
+    document.querySelectorAll('.agent-count-btn').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.count) === count);
+    });
+    // 同步质量
+    document.querySelectorAll('.agent-quality-btn').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.quality || '') === quality);
+    });
+    // 同步隐藏 select（保持后端兼容）
+    if(agentGenRatio) agentGenRatio.value = ratio;
+    if(agentGenResolution) agentGenResolution.value = res;
+    if(agentGenCount) agentGenCount.value = String(count);
 }
 function renderAgentSkill(){ /* Skill 已合并到附件系统，不再需要单独渲染 */ }
 function setAgentSkillFile(file){
@@ -17089,7 +17110,7 @@ async function runAgentGenerations(assistantMsg, userMsg){
             if(gen.use_last_outputs) refs = refs.concat(lastResults);
             if(gen.use_attachments) refs = refs.concat(attachRefs);
             refs = imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX).map(r => ({url:r.url, name:r.name || 'ref'}));
-            const payload = {prompt:gen.prompt, provider_id:providerId, model:genModel, size, quality:'auto', n:1, reference_images:refs};
+            const payload = {prompt:gen.prompt, provider_id:providerId, model:genModel, size, quality:agentState.genQuality || 'auto', n:1, reference_images:refs};
             const tasks = await Promise.all(Array.from({length:gen.count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
                 if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.agentGenFail')));
                 return r.json();
@@ -17257,9 +17278,9 @@ function initAgentPanel(){
         closeAllDropdowns();
         if(wasHidden && paramsPanel) paramsPanel.hidden = false;
     });
-    document.addEventListener('click', e => {
+    document.addEventListener('pointerdown', e => {
         if(!e.target.closest('.agent-toolbar-dropdown-wrap')) closeAllDropdowns();
-    });
+    }, true);
     agentToggle?.addEventListener('click', () => toggleAgentPanel());
     agentCloseBtn?.addEventListener('click', () => toggleAgentPanel(false));
     agentClearBtn?.addEventListener('click', () => {
@@ -17282,9 +17303,32 @@ function initAgentPanel(){
         saveAgentState();
     });
     agentGenModel?.addEventListener('change', () => { agentState.genModel = agentGenModel.value; agentUpdateToolbarLabels(); saveAgentState(); });
-    agentGenRatio?.addEventListener('change', () => { agentState.genRatio = agentGenRatio.value; agentUpdateToolbarLabels(); saveAgentState(); });
-    agentGenResolution?.addEventListener('change', () => { agentState.genResolution = agentGenResolution.value; agentUpdateToolbarLabels(); saveAgentState(); });
-    agentGenCount?.addEventListener('change', () => { agentState.genCount = Number(agentGenCount.value) || 1; agentUpdateToolbarLabels(); saveAgentState(); });
+    // 参数面板交互
+    document.getElementById('agentSizeGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-size-btn');
+        if(!btn || !agentState) return;
+        agentState.genRatio = btn.dataset.ratio || 'square';
+        agentState.genResolution = btn.dataset.res || '1k';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentCountGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-count-btn');
+        if(!btn || !agentState) return;
+        agentState.genCount = Number(btn.dataset.count) || 1;
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentQualitySeg')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-quality-btn');
+        if(!btn || !agentState) return;
+        agentState.genQuality = btn.dataset.quality || '';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
     agentAttachBtn?.addEventListener('click', () => agentImageInput?.click());
     agentImageInput?.addEventListener('change', () => {
         agentAttachFiles(agentImageInput.files);

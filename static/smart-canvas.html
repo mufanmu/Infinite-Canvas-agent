@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/i18n.js?v=2026.07.15.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784342461">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784343196">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -244,10 +244,42 @@
                         </div>
                         <div class="agent-toolbar-dropdown-wrap">
                             <button id="agentParamsBtn" class="agent-toolbar-btn" type="button"><span id="agentParamsLabel">16:9 · 1K · 1张</span><i data-lucide="chevron-down"></i></button>
-                            <div id="agentParamsPanel" class="agent-dropdown-panel" hidden>
-                                <div class="agent-dropdown-row"><label>比例</label><div class="agent-dropdown-selects" id="agentRatioSelect"></div></div>
-                                <div class="agent-dropdown-row"><label>分辨率</label><div class="agent-dropdown-selects" id="agentResSelect"></div></div>
-                                <div class="agent-dropdown-row"><label>数量</label><div class="agent-dropdown-selects" id="agentCountSelect"></div></div>
+                            <div id="agentParamsPanel" class="agent-dropdown-panel agent-params-panel" hidden>
+                                <div class="agent-params-section">
+                                    <div class="agent-params-title">质量</div>
+                                    <div class="agent-quality-seg" id="agentQualitySeg">
+                                        <button class="agent-quality-btn active" type="button" data-quality="">自动</button>
+                                        <button class="agent-quality-btn" type="button" data-quality="high">高</button>
+                                        <button class="agent-quality-btn" type="button" data-quality="medium">中</button>
+                                        <button class="agent-quality-btn" type="button" data-quality="low">低</button>
+                                    </div>
+                                </div>
+                                <div class="agent-params-section">
+                                    <div class="agent-params-title">Size</div>
+                                    <div class="agent-size-grid" id="agentSizeGrid">
+                                        <button class="agent-size-btn active" type="button" data-ratio="square" data-res="1k">1:1</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="landscape" data-res="1k">3:2</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="portrait" data-res="1k">2:3</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="landscape43" data-res="1k">4:3</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="portrait43" data-res="1k">3:4</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="story" data-res="1k">9:16</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="wide" data-res="1k">16:9</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="square" data-res="2k">1:1(2k)</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="wide" data-res="2k">16:9(2k)</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="story" data-res="2k">9:16(2k)</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="wide" data-res="4k">16:9(4k)</button>
+                                        <button class="agent-size-btn" type="button" data-ratio="story" data-res="4k">9:16(4k)</button>
+                                    </div>
+                                </div>
+                                <div class="agent-params-section">
+                                    <div class="agent-params-title">Image</div>
+                                    <div class="agent-count-grid" id="agentCountGrid">
+                                        <button class="agent-count-btn active" type="button" data-count="1">1 img</button>
+                                        <button class="agent-count-btn" type="button" data-count="2">2 img</button>
+                                        <button class="agent-count-btn" type="button" data-count="3">3 img</button>
+                                        <button class="agent-count-btn" type="button" data-count="4">4 img</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="agent-toolbar-spacer"></div>
@@ -503,6 +535,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784342612"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784343264"></script>
 </body>
 </html>
