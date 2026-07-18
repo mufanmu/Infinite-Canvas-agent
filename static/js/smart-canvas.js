@@ -15210,7 +15210,9 @@ async function pollSmartCanvasTask(taskId){
     if(activeSmartTaskPolls.has(taskId)) return activeSmartTaskPolls.get(taskId);
     const promise = (async () => {
         for(let i = 0; i < 900; i++){
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // 动态轮询间隔：前5次快速轮询（500ms），之后逐步增加到 2000ms
+            const pollInterval = i < 5 ? 500 : i < 15 ? 1000 : 2000;
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
             const task = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`).then(async r => {
                 if(!r.ok) throw new Error(await r.text());
                 return r.json();
@@ -17670,7 +17672,7 @@ async function runAgentGenerations(assistantMsg, userMsg){
     await Promise.all(gens.map(async gen => {
         gen.status = 'running';
         renderAgentMessages();
-        // 先创建占位节点（按照图片尺寸来）
+        // 先创建占位节点（按照当前选择的比例来）
         const pos = agentFindEmptyPosition(gen.count);
         const placeholderNode = createImageNodeAt(pos, []);
         if(placeholderNode){
@@ -17679,6 +17681,18 @@ async function runAgentGenerations(assistantMsg, userMsg){
             // 修复：设置计时开始时间，使占位节点显示正计时
             placeholderNode.runStartedAt = nowMs();
             placeholderNode.runTimerHidden = false;
+            // 修复：按当前选择的比例设置占位节点尺寸
+            const ratioSize = apiImageSize(agentState.genRatio || 'square', agentState.genResolution || '1k') || '1024x1024';
+            const sizeParts = String(ratioSize).split('x');
+            if(sizeParts.length === 2){
+                const rw = Number(sizeParts[0]) || 1024;
+                const rh = Number(sizeParts[1]) || 1024;
+                const ratio = rw / rh;
+                const baseW = 260;
+                const baseH = Math.round(baseW / ratio);
+                placeholderNode.w = baseW;
+                placeholderNode.h = baseH;
+            }
             // 修复：顶部对齐 — 找到已有图片节点的最小顶部 y，将占位节点顶部对齐
             const existingNodes = (nodes || []).filter(n => isSmartImageNode(n) && n.id !== placeholderNode.id && (n.images || []).some(img => img?.url));
             if(existingNodes.length){

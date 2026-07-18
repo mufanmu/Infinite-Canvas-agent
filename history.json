@@ -1,5 +1,47 @@
 [
     {
+        "prompt": "[generated 1 image(s) with prompt: 皮克斯3D动画风格的粉色小猪在阳光下奔跑，圆润的卡通造型搭配夸张的面部表情，草地呈现柔和的蓝绿色渐变，丁达尔光线效果转化为光粒子特效，超精细的毛发渲染（每根毛发都有高光），背景树木卡通化为柔和的墨绿色团块，16:9电影画幅带景深模糊，迪士尼皮克斯经典色彩管理]",
+        "images": [
+            "/assets/output/online_f57ee16724.png"
+        ],
+        "image_items": [
+            {
+                "url": "/assets/output/online_f57ee16724.png",
+                "kind": "image",
+                "name": "online_f57ee16724.png",
+                "natural_w": 1254,
+                "natural_h": 1254,
+                "width": 1254,
+                "height": 1254
+            }
+        ],
+        "timestamp": 1784385800.8972008,
+        "type": "online",
+        "model": "gpt-image-2",
+        "provider_id": "apimart",
+        "provider_name": "APIMART",
+        "task_id": "task_01KXTTS4QTJHHARYFSF31C8J52",
+        "request_id": null,
+        "params": {
+            "provider_id": "apimart",
+            "model": "gpt-image-2",
+            "size": "1024x1024",
+            "requested_size": "1024x1024",
+            "quality": "auto",
+            "n": 1,
+            "reference_images": [
+                {
+                    "url": "/assets/output/online_6c457f9d08.png",
+                    "name": "online_6c457f9d08.png",
+                    "role": "",
+                    "kind": "",
+                    "mime": ""
+                }
+            ]
+        },
+        "raw_usage": null
+    },
+    {
         "prompt": "[generated 1 image(s) with prompt: 写实风格的棕色猪在阳光下的草地上奔跑，午后柔和的光线穿透云层形成光束，猪的身体前倾呈现奔跑姿态，泥蹄翻起草皮，远处有模糊的树木轮廓与狗场景相同，8K高清画质，极致细节刻画卷曲的猪毛与草地露珠，自然纪录片电影色调保持统一]",
         "images": [
             "/assets/output/online_6c457f9d08.png"
