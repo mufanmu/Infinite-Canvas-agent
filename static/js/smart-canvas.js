@@ -5271,6 +5271,7 @@ function connectAssetLibrarySyncSocket(){
                 if(data?.type === 'asset_library_updated') handleAssetLibraryUpdatedMessage(data);
                 if(data?.type === 'canvas_updated') handleCanvasUpdatedMessage(data);
                 if(data?.type === 'canvas_task_done') handleCanvasTaskDoneMessage(data);
+                if(data?.type === 'agent_llm_done') handleAgentLlmDoneMessage(data);
             } catch(e) {}
         };
         socket.onclose = () => {
@@ -15215,6 +15216,34 @@ function handleCanvasTaskDoneMessage(data){
     const waiter = _canvasTaskWaiters.get(taskId);
     if(waiter) waiter(status);
 }
+// Agent LLM 任务 WebSocket 通知
+const _agentLlmWaiters = new Map();
+function handleAgentLlmDoneMessage(data){
+    const taskId = data?.task_id;
+    const status = data?.status;
+    if(!taskId) return;
+    const waiter = _agentLlmWaiters.get(taskId);
+    if(waiter) waiter(status || 'done');
+}
+async function pollAgentLlmTask(taskId){
+    if(!taskId) throw new Error('Invalid task ID');
+    for(let i = 0; i < 600; i++){
+        const wsNotify = new Promise(resolve => {
+            _agentLlmWaiters.set(taskId, (status) => resolve(status || 'done'));
+        });
+        const pollInterval = i < 5 ? 1000 : 3000;
+        const timeout = new Promise(resolve => setTimeout(() => resolve('poll'), pollInterval));
+        await Promise.race([wsNotify, timeout]);
+        _agentLlmWaiters.delete(taskId);
+        const task = await fetch(`/api/agent-llm-task/${encodeURIComponent(taskId)}`).then(async r => {
+            if(!r.ok) throw new Error(await r.text());
+            return r.json();
+        });
+        if(task.status === 'succeeded') return task.result || {};
+        if(task.status === 'failed') throw new Error(task.error || 'LLM task failed');
+    }
+    throw new Error('LLM task timeout');
+}
 async function pollSmartCanvasTask(taskId){
     if(!taskId) throw new Error(tr('smart.errRunFailed'));
     if(activeSmartTaskPolls.has(taskId)) return activeSmartTaskPolls.get(taskId);
@@ -16783,26 +16812,104 @@ function loadAgentState(){
     // 加载当前对话的 messages
     const activeConv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
     agentState.messages = activeConv ? (activeConv.messages || []).slice(-AGENT_MSG_MAX) : [];
-    // 检测上次中断的操作，添加提示消息
-    if(agentState._pendingMessage !== undefined){
-        const pendingText = String(agentState._pendingMessage || '');
-        if(pendingText && agentState.messages.length){
-            // 检查最后一条是否是用户消息（说明 assistant 还没回复就被中断了）
-            const lastMsg = agentState.messages[agentState.messages.length - 1];
-            if(lastMsg && lastMsg.role === 'user'){
-                agentState.messages.push({
-                    id: uid('am'),
-                    role: 'assistant',
-                    text: '⚠️ ' + (tr('smart.agentInterrupted') || '上次操作被中断，请重新发送'),
-                    options: [{label: tr('smart.agentRetry') || '重新发送', value: pendingText}],
-                    generations: [],
-                    ts: Date.now()
-                });
+    // 恢复中断的操作
+    _setupAgentRecovery();
+}
+// 恢复中断的 Agent 操作（页面刷新后调用）
+let _agentRecoveryInProgress = false;
+function _setupAgentRecovery(){
+    if(!agentState) return;
+    const pendingLlmTaskId = agentState._pendingLlmTaskId;
+    const pendingText = String(agentState._pendingMessage || '');
+    const pendingAttachments = Array.isArray(agentState._pendingAttachments) ? agentState._pendingAttachments : [];
+    const pendingUserMsg = agentState._pendingUserMsg;
+    // 情况1：LLM task 还在后端跑 → 恢复等待
+    if(pendingLlmTaskId && pendingText && pendingUserMsg){
+        const lastMsg = agentState.messages[agentState.messages.length - 1];
+        if(lastMsg && lastMsg.role === 'user' && lastMsg.text === pendingText){
+            // 在最后一条 user 消息后插入一条"恢复中"的 assistant 占位消息
+            agentState.messages.push({
+                id: uid('am'),
+                role: 'assistant',
+                text: '⏳ ' + (tr('smart.agentRecovering') || '正在恢复上次操作...'),
+                generations: [],
+                ts: Date.now()
+            });
+            agentThinking = true;
+            agentSending = true;
+            renderAgentMessages();
+            _agentRecoveryInProgress = true;
+            // 异步恢复 LLM task
+            (async () => {
+                try {
+                    const result = await pollAgentLlmTask(pendingLlmTaskId);
+                    // 移除占位的"恢复中"消息
+                    agentState.messages = agentState.messages.filter(m => m.text !== '⏳ ' + (tr('smart.agentRecovering') || '正在恢复上次操作...'));
+                    await processAgentLlmResult(result, pendingText, pendingAttachments, pendingUserMsg);
+                } catch(e) {
+                    agentState.messages = agentState.messages.filter(m => !m.text?.startsWith('⏳'));
+                    agentState.messages.push({id:uid('am'), role:'assistant', text:`⚠️ ${String(e.message || e).slice(0, 300)}`, generations:[], ts:Date.now()});
+                    renderAgentMessages();
+                    saveAgentState();
+                } finally {
+                    agentThinking = false;
+                    agentSending = false;
+                    _agentRecoveryInProgress = false;
+                    delete agentState._pendingMessage;
+                    delete agentState._pendingAttachments;
+                    delete agentState._pendingUserMsg;
+                    delete agentState._pendingLlmTaskId;
+                    renderAgentMessages();
+                    saveAgentState();
+                }
+            })();
+            return;
+        }
+    }
+    // 情况2：生图 task 还在后端跑（LLM 已完成但生图未完成）
+    const msgs = agentState.messages || [];
+    let hasRunningGen = false;
+    for(let i = msgs.length - 1; i >= 0; i--){
+        if(msgs[i].role !== 'assistant') continue;
+        const gens = msgs[i].generations || [];
+        for(const gen of gens){
+            if(gen.status === 'running' && gen.taskIds && gen.taskIds.length){
+                hasRunningGen = true;
+                break;
             }
         }
-        delete agentState._pendingMessage;
-        delete agentState._pendingAttachments;
+        break;
     }
+    if(hasRunningGen){
+        renderAgentMessages();
+        _agentRecoveryInProgress = true;
+        (async () => {
+            try {
+                await recoverAgentGenerations();
+            } finally {
+                _agentRecoveryInProgress = false;
+            }
+        })();
+        return;
+    }
+    // 情况3：只有 pendingMessage 但没有 LLM task（LLM 还没创建就断了）→ 提示重新发送
+    if(pendingText && agentState.messages.length){
+        const lastMsg = agentState.messages[agentState.messages.length - 1];
+        if(lastMsg && lastMsg.role === 'user'){
+            agentState.messages.push({
+                id: uid('am'),
+                role: 'assistant',
+                text: '⚠️ ' + (tr('smart.agentInterrupted') || '上次操作被中断，请重新发送'),
+                options: [{label: tr('smart.agentRetry') || '重新发送', value: pendingText}],
+                generations: [],
+                ts: Date.now()
+            });
+        }
+    }
+    delete agentState._pendingMessage;
+    delete agentState._pendingAttachments;
+    delete agentState._pendingUserMsg;
+    delete agentState._pendingLlmTaskId;
 }
 function saveAgentState(){
     clearTimeout(agentSaveTimer);
@@ -17445,6 +17552,101 @@ function parseAgentResponse(raw, lastUserText){
     }
     return {reply:text, generations:[]};
 }
+// 处理 LLM 返回结果：解析、兜底、创建 assistant 消息、运行生图
+// 提取为独立函数，以便刷新恢复时复用
+async function processAgentLlmResult(result, text, attachments, userMsg){
+    const parsed = parseAgentResponse(result.text || '', text);
+    // 生图意图兜底 + 修改意图检测
+    {
+        const lastUser = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+        if(lastUser && lastUser.text && parsed.reply){
+            const userText = String(lastUser.text || '').trim();
+            const replyText = String(parsed.reply || '');
+            const genPrompt = extractGenPrompt(replyText);
+            // 修改/转换意图检测
+            const userModifyRe = /改成|转换成|换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
+            const replyModifyRe = /为您(?:将|把).{0,30}?(?:转换|改成|换成|修改|变成|调整|转为|调成|重新画|重画)|(?:将|把).{0,20}?(?:转换|改成|换成|修改|变成).{0,10}?(?:风格|效果|版本|色调)/i;
+            const hasUserModifyIntent = userModifyRe.test(userText);
+            const hasReplyModify = replyModifyRe.test(replyText);
+            let isModifyScenario = hasUserModifyIntent || hasReplyModify;
+            // 修复链路断裂：如果上一条 assistant 有 prompts（确认模式），且当前用户消息是确认/生成意图
+            // 则继承上上条用户消息的修改意图
+            if(!isModifyScenario){
+                const msgs = agentState.messages || [];
+                // 找到最后一条 assistant 消息
+                for(let i = msgs.length - 1; i >= 0; i--){
+                    if(msgs[i].role === 'assistant'){
+                        const prevAssistant = msgs[i];
+                        // 如果上一条 assistant 有 prompts，说明是确认模式
+                        if(Array.isArray(prevAssistant.prompts) && prevAssistant.prompts.length > 0){
+                            // 当前用户消息是确认/生成意图
+                            const confirmRe = /^\s*(确认|生成|好的|好|可以|没问题|就这样|执行|继续|1|yes|ok)\s*$/i;
+                            if(confirmRe.test(userText)){
+                                // 找到上上条用户消息（即提出修改需求的那条）
+                                for(let j = i - 1; j >= 0; j--){
+                                    if(msgs[j].role === 'user'){
+                                        const prevUserText = String(msgs[j].text || '').trim();
+                                        if(userModifyRe.test(prevUserText)){
+                                            isModifyScenario = true;
+                                            // 如果当前消息没有明确 prompt，使用上上条的修改需求作为 prompt
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            if(parsed.generations.length === 0){
+                // 场景A：LLM 没返回 generations，需要兜底构造
+                const genInProgressRe = /正在生成|正在为你生成|正在为您生成|生成中|开始生成|马上生成|这就为你生成|这就为您生成|好的[,，]?\s*我来生成|好的[,，]?\s*马上|我将为你生成|我将为您生成|我来为你生成|我来为您生成|正在为你创建|正在为您创建|正在画|正在创建/i;
+                const userGenIntentRe = /我要生成|帮我生成|帮我画|画一|生成一|创建一|制作一|来一张|来幅|来张|给我画|给我生成|帮我创建|帮我做/i;
+                const meaninglessConfirmRe = /确认要生成|确认生成|确认要画|要为您生成.*吗|要生成.*吗|确认.*吗.*[？?]/i;
+                const noOptions = !parsed.options || parsed.options.length === 0;
+                const hasGenInProgress = genInProgressRe.test(replyText);
+                const hasUserGenIntent = noOptions && userGenIntentRe.test(userText);
+                const hasMeaninglessConfirm = noOptions && meaninglessConfirmRe.test(replyText);
+                const hasAnyIntent = hasGenInProgress || hasUserGenIntent || isModifyScenario || hasMeaninglessConfirm;
+                if(hasAnyIntent){
+                    const finalPrompt = genPrompt || userText;
+                    parsed.generations = [{
+                        prompt: finalPrompt,
+                        count: 1,
+                        use_last_outputs: isModifyScenario,
+                        use_attachments: !!(lastUser.images && lastUser.images.length),
+                        results: [],
+                        status: 'running'
+                    }];
+                    if(hasGenInProgress && !isModifyScenario && !hasMeaninglessConfirm){
+                        parsed.reply = tr('smart.agentGenerating') || '正在为您生成图片...';
+                    }
+                }
+            } else if(isModifyScenario){
+                // 场景B：LLM 返回了 generations，但修改场景下强制设置 use_last_outputs: true
+                parsed.generations.forEach(g => { g.use_last_outputs = true; });
+            }
+        }
+    }
+    // 如果用户点击了"重新生成提示词"，强制将 generations 设为空数组
+    const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+    if(lastUserMsg && String(lastUserMsg.text || '').includes('重新生成提示词')){
+        parsed.generations = [];
+    }
+    // 批量完整性检查
+    const requestedCount = chatRequestedImageCount(text);
+    if(requestedCount > 0 && parsed.generations.length > 0 && parsed.generations.length < requestedCount){
+        parsed.reply += `${AGENT_NL}(注意：请求了 ${requestedCount} 张，但仅生成了 ${parsed.generations.length} 张的提示词)`;
+    }
+    const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
+    agentState.messages.push(assistantMsg);
+    agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+    agentThinking = false;
+    renderAgentMessages();
+    saveAgentState();
+    if(assistantMsg.generations.length) await runAgentGenerations(assistantMsg, userMsg);
+}
 async function sendAgentMessage(){
     if(agentSending || !agentState) return;
     const text = String(agentInput?.value || '').trim();
@@ -17466,6 +17668,7 @@ async function sendAgentMessage(){
     // 保存待处理消息，刷新后可恢复
     agentState._pendingMessage = text;
     agentState._pendingAttachments = attachments.slice();
+    agentState._pendingUserMsg = userMsg;
     renderAgentMessages();
     saveAgentState();
     const contextImages = attachments.slice();
@@ -17474,89 +17677,36 @@ async function sendAgentMessage(){
             if(item?.url && contextImages.length < AGENT_LLM_IMAGE_MAX && !contextImages.some(i => i.url === item.url)) contextImages.push(item);
         });
     }
+    const llmPayload = {
+        message:text || '(please help me edit these images)',
+        messages:agentHistoryMessages().slice(0, -1),
+        images:contextImages.slice(0, AGENT_LLM_IMAGE_MAX).map(i => i.url),
+        videos:[],
+        model,
+        provider,
+        ms_model:provider === 'modelscope' ? model : '',
+        system_prompt:agentSystemPrompt()
+    };
     try {
-        const result = await fetch('/api/canvas-llm', {
+        // 创建后端 LLM 任务（息屏/刷新不会丢失）
+        const taskRes = await fetch('/api/agent-llm-task', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                message:text || '(please help me edit these images)',
-                messages:agentHistoryMessages().slice(0, -1),
-                images:contextImages.slice(0, AGENT_LLM_IMAGE_MAX).map(i => i.url),
-                videos:[],
-                model,
-                provider,
-                ms_model:provider === 'modelscope' ? model : '',
-                system_prompt:agentSystemPrompt()
-            })
+            body:JSON.stringify(llmPayload)
         }).then(async r => {
             if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.promptLlmFailed')));
             return r.json();
         });
-        const parsed = parseAgentResponse(result.text || '', text);
-        // 生图意图兜底：当 LLM 不遵循 JSON 格式、没返回 generations 时，
-        // 根据生图/修改/确认意图自动构造生图任务
-        // 同时：即使 LLM 返回了 generations，如果检测到修改意图但 use_last_outputs 未设置，也强制覆盖
-        {
-            const lastUser = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
-            if(lastUser && lastUser.text && parsed.reply){
-                const userText = String(lastUser.text || '').trim();
-                const replyText = String(parsed.reply || '');
-                const genPrompt = extractGenPrompt(replyText);
-                // 修改/转换意图检测
-                const userModifyRe = /改成|转换成|换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
-                const replyModifyRe = /为您(?:将|把).{0,30}?(?:转换|改成|换成|修改|变成|调整|转为|调成|重新画|重画)|(?:将|把).{0,20}?(?:转换|改成|换成|修改|变成).{0,10}?(?:风格|效果|版本|色调)/i;
-                const hasUserModifyIntent = userModifyRe.test(userText);
-                const hasReplyModify = replyModifyRe.test(replyText);
-                const isModifyScenario = hasUserModifyIntent || hasReplyModify;
-                
-                if(parsed.generations.length === 0){
-                    // 场景A：LLM 没返回 generations，需要兜底构造
-                    const genInProgressRe = /正在生成|正在为你生成|正在为您生成|生成中|开始生成|马上生成|这就为你生成|这就为您生成|好的[,，]?\s*我来生成|好的[,，]?\s*马上|我将为你生成|我将为您生成|我来为你生成|我来为您生成|正在为你创建|正在为您创建|正在画|正在创建/i;
-                    const userGenIntentRe = /我要生成|帮我生成|帮我画|画一|生成一|创建一|制作一|来一张|来幅|来张|给我画|给我生成|帮我创建|帮我做/i;
-                    const meaninglessConfirmRe = /确认要生成|确认生成|确认要画|要为您生成.*吗|要生成.*吗|确认.*吗.*[？?]/i;
-                    const noOptions = !parsed.options || parsed.options.length === 0;
-                    const hasGenInProgress = genInProgressRe.test(replyText);
-                    const hasUserGenIntent = noOptions && userGenIntentRe.test(userText);
-                    const hasMeaninglessConfirm = noOptions && meaninglessConfirmRe.test(replyText);
-                    const hasAnyIntent = hasGenInProgress || hasUserGenIntent || isModifyScenario || hasMeaninglessConfirm;
-                    if(hasAnyIntent){
-                        const finalPrompt = genPrompt || userText;
-                        parsed.generations = [{
-                            prompt: finalPrompt,
-                            count: 1,
-                            use_last_outputs: isModifyScenario,
-                            use_attachments: !!(lastUser.images && lastUser.images.length),
-                            results: [],
-                            status: 'running'
-                        }];
-                        if(hasGenInProgress && !isModifyScenario && !hasMeaninglessConfirm){
-                            parsed.reply = tr('smart.agentGenerating') || '正在为您生成图片...';
-                        }
-                    }
-                } else if(isModifyScenario){
-                    // 场景B：LLM 返回了 generations，但修改场景下强制设置 use_last_outputs: true
-                    // 确保 GPT Image 2 走 /images/edits 而不是 /images/generations
-                    parsed.generations.forEach(g => { g.use_last_outputs = true; });
-                }
-            }
-        }
-        // 如果用户点击了"重新生成提示词"，强制将 generations 设为空数组（只返回提示词，不生图）
-        const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
-        if(lastUserMsg && String(lastUserMsg.text || '').includes('重新生成提示词')){
-            parsed.generations = [];
-        }
-        // 批量完整性检查：用户请求 N 张但 generations 不足时提示
-        const requestedCount = chatRequestedImageCount(text);
-        if(requestedCount > 0 && parsed.generations.length > 0 && parsed.generations.length < requestedCount){
-            parsed.reply += `${AGENT_NL}(注意：请求了 ${requestedCount} 张，但仅生成了 ${parsed.generations.length} 张的提示词)`;
-        }
-        const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
-        agentState.messages.push(assistantMsg);
-        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
-        agentThinking = false;
-        renderAgentMessages();
+        const llmTaskId = taskRes.task_id;
+        if(!llmTaskId) throw new Error('Failed to create LLM task');
+        // 保存 LLM task ID，刷新后可恢复
+        agentState._pendingLlmTaskId = llmTaskId;
         saveAgentState();
-        if(assistantMsg.generations.length) await runAgentGenerations(assistantMsg, userMsg);
+        // 等待 LLM 结果（WebSocket 实时通知 + 轮询保底）
+        const result = await pollAgentLlmTask(llmTaskId);
+        delete agentState._pendingLlmTaskId;
+        // 处理结果
+        await processAgentLlmResult(result, text, attachments, userMsg);
     } catch(e) {
         agentThinking = false;
         agentState.messages.push({id:uid('am'), role:'assistant', text:`⚠️ ${String(e.message || e).slice(0, 300)}`, generations:[], ts:Date.now()});
@@ -17570,6 +17720,8 @@ async function sendAgentMessage(){
         if(agentState._pendingMessage !== undefined){
             delete agentState._pendingMessage;
             delete agentState._pendingAttachments;
+            delete agentState._pendingUserMsg;
+            delete agentState._pendingLlmTaskId;
             saveAgentState();
         }
         renderAgentMessages();
@@ -17698,7 +17850,12 @@ async function runAgentGenerations(assistantMsg, userMsg){
                 if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.agentGenFail')));
                 return r.json();
             })));
-            const results = await Promise.all(tasks.map(t => t.task_id).filter(Boolean).map(id => pollSmartCanvasTask(id)));
+            const imageTaskIds = tasks.map(t => t.task_id).filter(Boolean);
+            // 保存 task IDs 和 placeholderNodeId，以便刷新恢复
+            gen.taskIds = imageTaskIds;
+            if(placeholderNode) gen.placeholderNodeId = placeholderNode.id;
+            saveAgentState();
+            const results = await Promise.all(imageTaskIds.map(id => pollSmartCanvasTask(id)));
             const urls = results.flatMap(res => resultMediaUrls(res)).map((item, i) => {
                 const url = typeof item === 'string' ? item : item?.url || '';
                 return {url, name:(typeof item === 'object' && item?.name) || `agent-${Date.now()}-${i + 1}.png`, kind:'image'};
@@ -17733,6 +17890,57 @@ async function runAgentGenerations(assistantMsg, userMsg){
         render();
         scheduleSave();
     }));
+}
+// 恢复中断的 Agent 生图任务（页面刷新后调用）
+async function recoverAgentGenerations(){
+    if(!agentState?.messages) return;
+    const msgs = agentState.messages;
+    for(let i = msgs.length - 1; i >= 0; i--){
+        const msg = msgs[i];
+        if(msg.role !== 'assistant') continue;
+        const gens = msg.generations || [];
+        for(const gen of gens){
+            if(gen.status !== 'running' || !gen.taskIds || !gen.taskIds.length) continue;
+            // 找到占位节点
+            const placeholderNode = gen.placeholderNodeId ? nodes.find(n => n.id === gen.placeholderNodeId) : null;
+            if(placeholderNode){
+                placeholderNode.runStartedAt = placeholderNode.runStartedAt || nowMs();
+                placeholderNode.pending = gen.taskIds.length;
+            }
+            try {
+                const results = await Promise.all(gen.taskIds.map(id => pollSmartCanvasTask(id)));
+                const urls = results.flatMap(res => resultMediaUrls(res)).map((item, idx) => {
+                    const url = typeof item === 'string' ? item : item?.url || '';
+                    return {url, name:(typeof item === 'object' && item?.name) || `agent-${Date.now()}-${idx + 1}.png`, kind:'image'};
+                }).filter(i => i.url);
+                gen.results = urls;
+                gen.status = 'done';
+                if(urls.length && placeholderNode){
+                    undoSuppressed = true;
+                    placeholderNode.images = urls.map(u => ({...u}));
+                    placeholderNode.pending = 0;
+                    placeholderNode.title = urls.length > 1 ? 'Group' : 'Image';
+                    placeholderNode.runFinishedAt = nowMs();
+                    selectedId = placeholderNode.id;
+                    undoSuppressed = false;
+                    gen.results = gen.results.map((r, idx) => ({...r, nodeId: placeholderNode.id, nodeX: Number(placeholderNode.x) || 0, nodeY: Number(placeholderNode.y) || 0}));
+                }
+            } catch(e) {
+                gen.status = 'error';
+                gen.error = String(e.message || e).slice(0, 200);
+                if(placeholderNode){
+                    undoSuppressed = true;
+                    nodes = nodes.filter(n => n.id !== placeholderNode.id);
+                    undoSuppressed = false;
+                }
+            }
+            renderAgentMessages();
+            saveAgentState();
+            render();
+            scheduleSave();
+        }
+        break; // 只恢复最后一条 assistant 消息的生图
+    }
 }
 function agentCanvasImages(){
     const items = [];

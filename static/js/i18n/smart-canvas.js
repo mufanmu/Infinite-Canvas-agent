@@ -304,6 +304,7 @@
 "smart.agentCollapse": { zh: "收起", en: "Collapse" },
 "smart.agentInterrupted": { zh: "上次操作被中断，请重新发送", en: "Last operation was interrupted, please resend" },
 "smart.agentRetry": { zh: "重新发送", en: "Resend" },
+"smart.agentRecovering": { zh: "正在恢复上次操作...", en: "Recovering last operation..." },
         "smart.agentThinking": { zh: "正在思考...", en: "Thinking..." },
         "smart.agentNeedChatModel": { zh: "请先在 API 设置中配置聊天模型", en: "Please configure a chat provider in API settings first" },
         "smart.agentNeedGenModel": { zh: "请先在 API 设置中配置生图模型", en: "Please configure an image provider in API settings first" },

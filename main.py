@@ -169,6 +169,15 @@ class ConnectionManager:
                 print(f"Broadcast canvas task done error: {e}")
                 self.active_connections.remove(connection)
 
+    async def broadcast_agent_llm_done(self, task_id: str, status: str):
+        data = json.dumps({"type": "agent_llm_done", "task_id": task_id, "status": status})
+        for connection in self.active_connections[:]:
+            try:
+                await connection.send_text(data)
+            except Exception as e:
+                print(f"Broadcast agent llm done error: {e}")
+                self.active_connections.remove(connection)
+
     async def send_personal_message(self, message: dict, client_id: str):
         ws = self.user_connections.get(client_id)
         if ws:
@@ -2523,6 +2532,8 @@ class ImageTaskQueryRequest(BaseModel):
 
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_TASK_LOCK = Lock()
+AGENT_LLM_TASKS: Dict[str, Dict[str, Any]] = {}
+AGENT_LLM_TASK_LOCK = Lock()
 
 class CanvasVideoRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=VIDEO_PROMPT_MAX_LENGTH)
@@ -13435,6 +13446,63 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
             await manager.broadcast_canvas_task_done(task_id, "failed")
         except Exception:
             pass
+
+async def run_agent_llm_task(task_id: str, payload: CanvasLLMRequest):
+    with AGENT_LLM_TASK_LOCK:
+        if task_id in AGENT_LLM_TASKS:
+            AGENT_LLM_TASKS[task_id]["status"] = "running"
+            AGENT_LLM_TASKS[task_id]["updated_at"] = time.time()
+    try:
+        result = await canvas_llm(payload)
+        with AGENT_LLM_TASK_LOCK:
+            AGENT_LLM_TASKS[task_id].update({
+                "status": "succeeded",
+                "result": result,
+                "error": "",
+                "updated_at": time.time(),
+            })
+        try:
+            await manager.broadcast_agent_llm_done(task_id, "succeeded")
+        except Exception:
+            pass
+    except Exception as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        status_code = getattr(exc, "status_code", 500)
+        with AGENT_LLM_TASK_LOCK:
+            AGENT_LLM_TASKS[task_id].update({
+                "status": "failed",
+                "error": str(detail),
+                "status_code": status_code,
+                "updated_at": time.time(),
+            })
+        try:
+            await manager.broadcast_agent_llm_done(task_id, "failed")
+        except Exception:
+            pass
+
+@app.post("/api/agent-llm-task")
+async def create_agent_llm_task(payload: CanvasLLMRequest):
+    task_id = f"agent_llm_{uuid.uuid4().hex}"
+    with AGENT_LLM_TASK_LOCK:
+        AGENT_LLM_TASKS[task_id] = {
+            "id": task_id,
+            "type": "agent-llm",
+            "status": "queued",
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "result": None,
+            "error": "",
+        }
+    asyncio.create_task(run_agent_llm_task(task_id, payload))
+    return {"task_id": task_id, "status": "queued"}
+
+@app.get("/api/agent-llm-task/{task_id}")
+async def get_agent_llm_task(task_id: str):
+    with AGENT_LLM_TASK_LOCK:
+        task = dict(AGENT_LLM_TASKS.get(task_id) or {})
+    if not task:
+        raise HTTPException(status_code=404, detail="Agent LLM 任务不存在，可能服务已重启")
+    return task
 
 @app.post("/api/canvas-image-tasks")
 async def create_canvas_image_task(payload: OnlineImageRequest):
