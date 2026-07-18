@@ -1239,7 +1239,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-toolbar-btn:hover { color:var(--text); background:var(--soft); }
 .agent-toolbar-btn i,.agent-toolbar-btn svg { width:11px; height:11px; }
 .agent-toolbar-spacer { flex:1; }
-.agent-dropdown-panel { position:fixed; min-width:200px; max-width:calc(100vw - 60px); border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:100; padding:8px; display:flex; flex-direction:column; gap:6px; }
+.agent-dropdown-panel { position:fixed; min-width:200px; max-width:calc(100vw - 60px); border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:9999; padding:8px; display:flex; flex-direction:column; gap:6px; }
 .agent-dropdown-panel[hidden] { display:none; }
 .agent-dropdown-row { display:flex; align-items:center; gap:6px; }
 .agent-dropdown-row label { flex:0 0 36px; font-size:10px; font-weight:750; color:var(--muted); }

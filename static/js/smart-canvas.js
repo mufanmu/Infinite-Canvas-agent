@@ -17534,7 +17534,7 @@ function initAgentPanel(){
         if(wasHidden) showDropdown(paramsBtn, paramsPanel);
     });
     document.addEventListener('pointerdown', e => {
-        if(!e.target.closest('.agent-toolbar-dropdown-wrap')) closeAllDropdowns();
+        if(!e.target.closest('.agent-toolbar-dropdown-wrap') && !e.target.closest('.agent-dropdown-panel')) closeAllDropdowns();
     }, true);
     agentToggle?.addEventListener('click', () => toggleAgentPanel());
     agentCloseBtn?.addEventListener('click', () => toggleAgentPanel(false));
