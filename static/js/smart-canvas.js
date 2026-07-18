@@ -16695,10 +16695,11 @@ const AGENT_NL = String.fromCharCode(10);
 const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent inside an infinite-canvas app. If a skill document is provided above, follow its style and rules closely.
 
 You MUST reply with a raw JSON object only. No markdown fences, no explanation, no extra text:
-{"reply":"your conversational reply","generations":[{"prompt":"detailed image prompt in English","count":1,"use_last_outputs":false,"use_attachments":false}]}
+{"reply":"your conversational reply","options":[{"label":"确认","value":"确认"},{"label":"修改","value":"修改"}],"generations":[{"prompt":"detailed image prompt in English","count":1,"use_last_outputs":false,"use_attachments":false}]}
 
 Rules:
 - "reply": text shown to the user, written in the user's language.
+- "options": optional array of action buttons shown below your reply. Use when you ask the user to confirm, choose, or decide. Each option has "label" (button text) and "value" (text sent when clicked). Omit or use [] when no options are needed.
 - "generations": images to generate right away. Use [] when no image is needed (questions, chat, prompt discussion).
 - "prompt": detailed, self-contained image prompt written in English unless the skill says otherwise.
 - "count": integer 1 to 8.
@@ -16989,34 +16990,12 @@ function agentGenCardHtml(gen){
     const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer">`).join('');
     return `<div class="agent-gen-card"><div class="agent-gen-prompt">${escapeHtml(gen.prompt || '')}</div><div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${refTags ? ' · ' + escapeHtml(refTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
 }
-function agentDetectOptions(text){
-    if(!text) return [];
-    const t = String(text).toLowerCase();
-    const options = [];
-    // 检测确认类关键词
-    if(t.includes('确认') || t.includes('认可') || t.includes('同意') || t.includes('好的') || t.includes('可以')){
-        options.push({label:'确认', value:'确认'});
-    }
-    // 检测修改类关键词
-    if(t.includes('修改') || t.includes('调整') || t.includes('改变') || t.includes('重写') || t.includes('重新')){
-        options.push({label:'修改', value:'修改'});
-    }
-    // 检测取消类关键词
-    if(t.includes('取消') || t.includes('不要') || t.includes('放弃') || t.includes('停止')){
-        options.push({label:'取消', value:'取消'});
-    }
-    // 检测继续类关键词
-    if(t.includes('继续') || t.includes('下一步') || t.includes('接着')){
-        options.push({label:'继续', value:'继续'});
-    }
-    return options;
-}
 function agentMessageHtml(msg){
     const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
     const gens = (msg.generations || []).map(agentGenCardHtml).join('');
     const actions = msg.text ? `<div class="agent-msg-actions"><button class="agent-msg-action-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}" title="复制"><i data-lucide="copy"></i></button>${msg.role === 'assistant' ? `<button class="agent-msg-action-btn" type="button" data-agent-retry="${escapeHtml(msg.id)}" title="重试"><i data-lucide="refresh-cw"></i></button>` : ''}</div>` : '';
-    // 关键词检测选项按钮（仅 assistant 消息）
-    const options = msg.role === 'assistant' ? agentDetectOptions(msg.text) : [];
+    // 结构化 options 字段（仅 assistant 消息）
+    const options = Array.isArray(msg.options) ? msg.options : [];
     const optionsHtml = options.length ? `<div class="agent-msg-options">${options.map(opt => `<button class="agent-msg-option-btn" type="button" data-agent-option="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</button>`).join('')}</div>` : '';
     return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${optionsHtml}${actions}</div>`;
 }
@@ -17271,11 +17250,15 @@ function parseAgentResponse(raw){
             const data = JSON.parse(candidate);
             if(!data || typeof data !== 'object') continue;
             const reply = typeof data.reply === 'string' ? data.reply : (typeof data.text === 'string' ? data.text : '');
+            const options = (Array.isArray(data.options) ? data.options : [])
+                .filter(o => o && typeof o.label === 'string' && typeof o.value === 'string')
+                .slice(0, 4)
+                .map(o => ({label:o.label.trim(), value:o.value.trim()}));
             const generations = (Array.isArray(data.generations) ? data.generations : [])
                 .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
                 .slice(0, AGENT_GEN_MAX_PER_MSG)
                 .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
-            return {reply, generations};
+            return {reply, options, generations};
         } catch(e) { /* 尝试下一个候选 */ }
     }
     return {reply:text, generations:[]};
@@ -17330,7 +17313,7 @@ async function sendAgentMessage(){
         if(requestedCount > 0 && parsed.generations.length > 0 && parsed.generations.length < requestedCount){
             parsed.reply += `${AGENT_NL}(注意：请求了 ${requestedCount} 张，但仅生成了 ${parsed.generations.length} 张的提示词)`;
         }
-        const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, generations:parsed.generations, ts:Date.now()};
+        const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], generations:parsed.generations, ts:Date.now()};
         agentState.messages.push(assistantMsg);
         agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
         agentThinking = false;
@@ -17522,11 +17505,25 @@ function agentMentionKeydown(e){
     }
     return false;
 }
+function agentAutoResizeInput(){
+    const textarea = document.getElementById('agentInput');
+    if(!textarea) return;
+    textarea.style.height = 'auto';
+    const maxH = 500;
+    const newH = Math.min(textarea.scrollHeight, maxH);
+    textarea.style.height = newH + 'px';
+    if(agentState){
+        agentState.inputHeight = newH;
+        saveAgentState();
+    }
+}
 function initAgentInputResize(){
     const handle = document.getElementById('agentInputResize');
     const textarea = document.getElementById('agentInput');
     if(!handle || !textarea) return;
     if(agentState?.inputHeight > 0) textarea.style.height = agentState.inputHeight + 'px';
+    // 根据文字自动拉高
+    textarea.addEventListener('input', agentAutoResizeInput);
     let startY = 0, startH = 0;
     handle.addEventListener('mousedown', e => {
         e.preventDefault();
@@ -17535,7 +17532,7 @@ function initAgentInputResize(){
         handle.classList.add('dragging');
         const onMove = ev => {
             const delta = startY - ev.clientY;
-            const newH = Math.max(60, Math.min(startH + delta, window.innerHeight * 0.4));
+            const newH = Math.max(60, Math.min(startH + delta, 500));
             textarea.style.height = newH + 'px';
         };
         const onUp = () => {
