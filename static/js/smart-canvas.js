@@ -17173,7 +17173,12 @@ function renderAgentMessages(){
         btn.onclick = e => {
             e.stopPropagation();
             const msg = (agentState?.messages || []).find(m => m.id === btn.dataset.agentCopy);
-            if(msg?.text) agentCopyMessage(msg.text);
+            if(!msg) return;
+            // 优先复制生图 prompt，其次复制消息文本
+            const gens = msg.generations || [];
+            const firstGen = gens.find(g => g.prompt);
+            const text = firstGen ? firstGen.prompt : msg.text;
+            if(text) agentCopyMessage(text);
         };
     });
     agentMessages.querySelectorAll('[data-agent-retry]').forEach(btn => {
@@ -17610,19 +17615,18 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
                 const hasMeaninglessConfirm = noOptions && meaninglessConfirmRe.test(replyText);
                 const hasAnyIntent = hasGenInProgress || hasUserGenIntent || isModifyScenario || hasMeaninglessConfirm;
                 if(hasAnyIntent){
-                    const finalPrompt = genPrompt || userText;
-                    parsed.generations = [{
-                        prompt: finalPrompt,
-                        count: 1,
-                        use_last_outputs: isModifyScenario,
-                        use_attachments: !!(lastUser.images && lastUser.images.length),
-                        results: [],
-                        status: 'running'
-                    }];
-                    if(hasGenInProgress && !isModifyScenario && !hasMeaninglessConfirm){
-                        parsed.reply = tr('smart.agentGenerating') || '正在为您生成图片...';
+                        const finalPrompt = genPrompt || userText;
+                        parsed.generations = [{
+                            prompt: finalPrompt,
+                            count: 1,
+                            use_last_outputs: isModifyScenario,
+                            use_attachments: !!(lastUser.images && lastUser.images.length),
+                            results: [],
+                            status: 'running'
+                        }];
+                        // 不覆盖 parsed.reply，保留 LLM 原始回复
+                        // generation card 会独立显示状态和 prompt
                     }
-                }
             } else if(isModifyScenario){
                 // 场景B：LLM 返回了 generations，但修改场景下强制设置 use_last_outputs: true
                 parsed.generations.forEach(g => { g.use_last_outputs = true; });
