@@ -1160,7 +1160,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-toggle:hover { border-color:var(--text); transform:translateY(-1px); }
 .agent-toggle.active { background:var(--strong); color:var(--strong-text); border-color:var(--strong); box-shadow:0 16px 38px var(--shadow); }
 .agent-toggle i,.agent-toggle svg { width:16px; height:16px; }
-.agent-panel { position:absolute; right:22px; top:66px; bottom:168px; z-index:55; width:360px; max-width:calc(100vw - 44px); min-height:0; display:flex; flex-direction:column; gap:10px; padding:12px; border-radius:18px; background:var(--panel); border:1px solid var(--line); box-shadow:0 22px 58px var(--shadow); backdrop-filter:blur(20px); overflow:hidden; transform:translateX(16px); opacity:0; visibility:hidden; pointer-events:none; transition:opacity .16s ease, transform .16s ease, visibility .16s ease; }
+.agent-panel { position:absolute; right:22px; top:66px; bottom:22px; z-index:55; width:360px; max-width:calc(100vw - 44px); min-height:0; display:flex; flex-direction:column; gap:10px; padding:12px; border-radius:18px; background:var(--panel); border:1px solid var(--line); box-shadow:0 22px 58px var(--shadow); backdrop-filter:blur(20px); overflow:hidden; transform:translateX(16px); opacity:0; visibility:hidden; pointer-events:none; transition:opacity .16s ease, transform .16s ease, visibility .16s ease; }
 .agent-panel.open { opacity:1; visibility:visible; pointer-events:auto; transform:translateX(0); }
 .agent-skill-zone { display:flex; flex-direction:column; gap:6px; }
 .agent-skill-drop { min-height:44px; border:1px dashed var(--line); border-radius:13px; display:flex; align-items:center; justify-content:center; gap:7px; text-align:center; padding:8px; color:var(--faint); font-size:10.5px; font-weight:600; background:var(--soft); cursor:pointer; transition:border-color .14s ease, color .14s ease, background .14s ease; }
@@ -1182,6 +1182,25 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-messages { min-height:0; flex:1 1 auto; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; display:flex; flex-direction:column; gap:10px; padding:4px 4px 8px 2px; scrollbar-width:thin; scrollbar-color:rgba(148,163,184,.42) transparent; }
 .agent-messages::-webkit-scrollbar { width:7px; }
 .agent-messages::-webkit-scrollbar-thumb { background:rgba(148,163,184,.42); border-radius:999px; border:2px solid transparent; background-clip:content-box; }
+.agent-chat-list-panel { position:absolute; top:46px; left:12px; right:12px; max-height:300px; overflow-y:auto; border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 8px 32px rgba(15,23,42,.14); z-index:70; padding:6px; display:flex; flex-direction:column; gap:2px; }
+.agent-chat-list-panel[hidden] { display:none; }
+.agent-chat-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; border:none; background:none; color:var(--text); font-size:10.5px; font-weight:650; cursor:pointer; text-align:left; transition:background .14s ease; }
+.agent-chat-item:hover { background:var(--soft); }
+.agent-chat-item.active { background:var(--soft); font-weight:750; }
+.agent-chat-item-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.agent-chat-item-time { flex:0 0 auto; font-size:9px; color:var(--faint); }
+.agent-chat-item-delete { flex:0 0 auto; width:20px; height:20px; border-radius:6px; border:none; background:none; color:var(--faint); cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; }
+.agent-chat-item-delete:hover { color:#ef4444; background:rgba(239,68,68,.1); }
+.agent-chat-item-delete i,.agent-chat-item-delete svg { width:11px; height:11px; }
+.agent-chat-empty { padding:16px; text-align:center; font-size:10.5px; color:var(--faint); }
+
+/* 消息操作按钮 */
+.agent-msg-actions { display:flex; gap:2px; opacity:0; transition:opacity .14s ease; }
+.agent-msg:hover .agent-msg-actions { opacity:1; }
+.agent-msg-action-btn { width:22px; height:22px; border-radius:6px; border:none; background:none; color:var(--faint); cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; transition:color .14s ease, background .14s ease; }
+.agent-msg-action-btn:hover { color:var(--text); background:var(--soft); }
+.agent-msg-action-btn i,.agent-msg-action-btn svg { width:11px; height:11px; }
+
 .agent-empty { margin:auto; text-align:center; color:var(--faint); font-size:11px; line-height:1.7; padding:20px 12px; }
 .agent-empty i,.agent-empty svg { width:26px; height:26px; display:block; margin:0 auto 8px; }
 .agent-msg { display:flex; flex-direction:column; gap:5px; max-width:88%; }
@@ -1200,7 +1219,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-gen-spinner { width:12px; height:12px; border-radius:50%; border:2px solid var(--line); border-top-color:var(--strong); animation:agentSpin .8s linear infinite; flex:0 0 auto; }
 @keyframes agentSpin { to { transform:rotate(360deg); } }
 .agent-input-area { display:flex; flex-direction:column; gap:0; position:relative; }
-.agent-onebox { border:1px solid var(--line); border-radius:16px; background:var(--card); overflow:hidden; transition:border-color .14s ease; }
+.agent-onebox { border:1px solid var(--line); border-radius:16px; background:var(--card); transition:border-color .14s ease; }
 .agent-onebox:focus-within { border-color:var(--strong); }
 .agent-attach-row { display:flex; flex-wrap:wrap; gap:6px; padding:8px 10px 0; }
 .agent-attach-row:empty { display:none; }
@@ -1218,7 +1237,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-toolbar-btn:hover { color:var(--text); background:var(--soft); }
 .agent-toolbar-btn i,.agent-toolbar-btn svg { width:11px; height:11px; }
 .agent-toolbar-spacer { flex:1; }
-.agent-dropdown-panel { position:absolute; bottom:100%; left:0; min-width:200px; margin-bottom:6px; border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:60; padding:8px; display:flex; flex-direction:column; gap:6px; }
+.agent-dropdown-panel { position:absolute; bottom:100%; left:0; right:auto; min-width:200px; max-width:calc(100vw - 60px); margin-bottom:6px; border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:60; padding:8px; display:flex; flex-direction:column; gap:6px; }
 .agent-dropdown-panel[hidden] { display:none; }
 .agent-dropdown-row { display:flex; align-items:center; gap:6px; }
 .agent-dropdown-row label { flex:0 0 36px; font-size:10px; font-weight:750; color:var(--muted); }
@@ -1227,7 +1246,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-dropdown-selects select:focus { border-color:var(--strong); }
 
 /* 参数面板（OneBox 风格） */
-.agent-params-panel { min-width:260px; padding:12px; gap:14px; }
+.agent-params-panel { min-width:260px; padding:12px; gap:14px; left:auto; right:0; }
 .agent-params-section { display:flex; flex-direction:column; gap:6px; }
 .agent-params-title { font-size:10px; font-weight:750; color:var(--muted); }
 .agent-quality-seg { display:flex; border-radius:10px; background:var(--soft); border:1px solid var(--line); overflow:hidden; }

@@ -53,7 +53,6 @@ const assetHoverPreview = document.getElementById('assetHoverPreview');
 const agentToggle = document.getElementById('agentToggle');
 const agentPanel = document.getElementById('agentPanel');
 const agentCloseBtn = document.getElementById('agentCloseBtn');
-const agentClearBtn = document.getElementById('agentClearBtn');
 
 const agentChatProvider = document.getElementById('agentChatProvider');
 const agentChatModel = document.getElementById('agentChatModel');
@@ -16699,7 +16698,7 @@ let agentSaveTimer = null;
 let agentState = null;
 let agentMentionIdx = -1;
 function agentDefaultState(){
-    return {skills:[], attachments:[], messages:[], chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, genQuality:'', autoContext:true, inputHeight:0};
+    return {skills:[], attachments:[], messages:[], conversations:[], activeConversationId:'', chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, genQuality:'', autoContext:true, inputHeight:0};
 }
 function agentStorageKey(){ return AGENT_STORAGE_PREFIX + (canvasId || 'default'); }
 // 生图 provider 列表：与主画布的 imageProviders() 不同，这里不排除 modelscope/volcengine，
@@ -16725,12 +16724,30 @@ function loadAgentState(){
     delete agentState.skill;
     if(!Array.isArray(agentState.skills)) agentState.skills = [];
     if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
-    agentState.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+    // 旧数据迁移：messages → conversations
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    if(agentState.messages && agentState.messages.length && !agentState.conversations.length){
+        const firstMsg = agentState.messages[0];
+        const title = firstMsg?.text ? String(firstMsg.text).slice(0, 30) : '对话';
+        agentState.conversations = [{id:uid('ac'), title, messages:agentState.messages, ts:Date.now()}];
+        agentState.activeConversationId = agentState.conversations[0].id;
+    }
+    if(!agentState.activeConversationId && agentState.conversations.length){
+        agentState.activeConversationId = agentState.conversations[0].id;
+    }
+    // 加载当前对话的 messages
+    const activeConv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+    agentState.messages = activeConv ? (activeConv.messages || []).slice(-AGENT_MSG_MAX) : [];
 }
 function saveAgentState(){
     clearTimeout(agentSaveTimer);
     agentSaveTimer = setTimeout(() => {
         try {
+            // 同步当前 messages 到 conversations
+            if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+                const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+                if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+            }
             const data = {...agentState, messages:(agentState.messages || []).slice(-AGENT_MSG_MAX)};
             localStorage.setItem(agentStorageKey(), JSON.stringify(data));
         } catch(e) { /* localStorage 写满时静默忽略 */ }
@@ -16932,7 +16949,8 @@ function agentGenCardHtml(gen){
 function agentMessageHtml(msg){
     const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
     const gens = (msg.generations || []).map(agentGenCardHtml).join('');
-    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}</div>`;
+    const actions = msg.text ? `<div class="agent-msg-actions"><button class="agent-msg-action-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}" title="复制"><i data-lucide="copy"></i></button>${msg.role === 'assistant' ? `<button class="agent-msg-action-btn" type="button" data-agent-retry="${escapeHtml(msg.id)}" title="重试"><i data-lucide="refresh-cw"></i></button>` : ''}</div>` : '';
+    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${actions}</div>`;
 }
 function renderAgentMessages(){
     if(!agentMessages || !agentState) return;
@@ -16946,6 +16964,20 @@ function renderAgentMessages(){
     if(window.lucide) lucide.createIcons();
     agentMessages.scrollTop = agentMessages.scrollHeight;
     if(agentSendBtn) agentSendBtn.disabled = agentSending;
+    // 绑定消息操作按钮
+    agentMessages.querySelectorAll('[data-agent-copy]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const msg = (agentState?.messages || []).find(m => m.id === btn.dataset.agentCopy);
+            if(msg?.text) agentCopyMessage(msg.text);
+        };
+    });
+    agentMessages.querySelectorAll('[data-agent-retry]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            agentRetryMessage(btn.dataset.agentRetry);
+        };
+    });
 }
 function agentLastResults(){
     const msgs = agentState?.messages || [];
@@ -16961,6 +16993,118 @@ function agentLastUserAttachments(){
         if(msgs[i].role === 'user' && (msgs[i].images || []).some(img => img?.url)) return msgs[i].images.filter(img => img?.url);
     }
     return [];
+}
+function agentNewChat(){
+    if(!agentState) return;
+    // 保存当前对话
+    if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+        const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+        if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+    }
+    // 创建新对话
+    const newConv = {id:uid('ac'), title:'新对话', messages:[], ts:Date.now()};
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    agentState.conversations.unshift(newConv);
+    agentState.activeConversationId = newConv.id;
+    agentState.messages = [];
+    renderAgentMessages();
+    saveAgentState();
+}
+function agentDeleteChat(){
+    if(!agentState || !agentState.activeConversationId) return;
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    agentState.conversations = agentState.conversations.filter(c => c.id !== agentState.activeConversationId);
+    if(agentState.conversations.length){
+        agentState.activeConversationId = agentState.conversations[0].id;
+        agentState.messages = (agentState.conversations[0].messages || []).slice(-AGENT_MSG_MAX);
+    } else {
+        agentState.activeConversationId = '';
+        agentState.messages = [];
+    }
+    renderAgentMessages();
+    renderAgentChatList();
+    saveAgentState();
+}
+function agentSwitchChat(id){
+    if(!agentState || !id || id === agentState.activeConversationId) return;
+    // 保存当前对话
+    if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+        const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+        if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+    }
+    // 切换
+    const target = agentState.conversations.find(c => c.id === id);
+    if(!target) return;
+    agentState.activeConversationId = id;
+    agentState.messages = (target.messages || []).slice(-AGENT_MSG_MAX);
+    renderAgentMessages();
+    renderAgentChatList();
+    saveAgentState();
+}
+function renderAgentChatList(){
+    const panel = document.getElementById('agentChatListPanel');
+    if(!panel || !agentState) return;
+    const convs = Array.isArray(agentState.conversations) ? agentState.conversations : [];
+    if(!convs.length){
+        panel.innerHTML = '<div class="agent-chat-empty">暂无对话</div>';
+        return;
+    }
+    panel.innerHTML = convs.map(conv => {
+        const isActive = conv.id === agentState.activeConversationId;
+        const firstMsg = (conv.messages || []).find(m => m.role === 'user' && m.text);
+        const title = firstMsg ? String(firstMsg.text).slice(0, 30) : (conv.title || '对话');
+        const time = conv.ts ? new Date(conv.ts).toLocaleDateString('zh-CN', {month:'numeric', day:'numeric'}) : '';
+        return `<button class="agent-chat-item${isActive ? ' active' : ''}" type="button" data-chat-id="${escapeHtml(conv.id)}"><span class="agent-chat-item-title">${escapeHtml(title)}</span><span class="agent-chat-item-time">${escapeHtml(time)}</span><button class="agent-chat-item-delete" type="button" data-chat-delete="${escapeHtml(conv.id)}"><i data-lucide="x"></i></button></button>`;
+    }).join('');
+    if(window.lucide) lucide.createIcons();
+    panel.querySelectorAll('[data-chat-id]').forEach(btn => {
+        btn.onclick = e => {
+            if(e.target.closest('[data-chat-delete]')) return;
+            agentSwitchChat(btn.dataset.chatId);
+            panel.hidden = true;
+        };
+    });
+    panel.querySelectorAll('[data-chat-delete]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const id = btn.dataset.chatDelete;
+            if(id === agentState.activeConversationId) agentDeleteChat();
+            else {
+                agentState.conversations = agentState.conversations.filter(c => c.id !== id);
+                renderAgentChatList();
+                saveAgentState();
+            }
+        };
+    });
+}
+function agentCopyMessage(text){
+    if(!text) return;
+    navigator.clipboard?.writeText(text).then(() => toast('已复制')).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toast('已复制');
+    });
+}
+function agentRetryMessage(msgId){
+    if(!agentState || agentSending) return;
+    const msgs = agentState.messages || [];
+    const idx = msgs.findIndex(m => m.id === msgId);
+    if(idx < 0) return;
+    // 找到该 assistant 消息对应的 user 消息
+    let userMsg = null;
+    for(let i = idx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
+    }
+    if(!userMsg) return;
+    // 删除该 assistant 消息及之后的所有消息
+    agentState.messages = msgs.slice(0, idx);
+    // 重新发送
+    if(agentInput) agentInput.value = userMsg.text || '';
+    sendAgentMessage();
 }
 function agentSystemPrompt(){
     const parts = [];
@@ -17283,12 +17427,22 @@ function initAgentPanel(){
     }, true);
     agentToggle?.addEventListener('click', () => toggleAgentPanel());
     agentCloseBtn?.addEventListener('click', () => toggleAgentPanel(false));
-    agentClearBtn?.addEventListener('click', () => {
-        if(!agentState) return;
-        agentState.messages = [];
-        renderAgentMessages();
-        saveAgentState();
+    document.getElementById('agentNewChatBtn')?.addEventListener('click', () => agentNewChat());
+    document.getElementById('agentDeleteChatBtn')?.addEventListener('click', () => agentDeleteChat());
+    document.getElementById('agentChatListBtn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        const panel = document.getElementById('agentChatListPanel');
+        if(!panel) return;
+        const wasHidden = panel.hidden;
+        if(wasHidden) renderAgentChatList();
+        panel.hidden = !wasHidden;
     });
+    document.addEventListener('pointerdown', e => {
+        const panel = document.getElementById('agentChatListPanel');
+        if(panel && !panel.hidden && !e.target.closest('#agentChatListPanel') && !e.target.closest('#agentChatListBtn')){
+            panel.hidden = true;
+        }
+    }, true);
     agentChatProvider?.addEventListener('change', () => {
         agentState.chatProvider = agentChatProvider.value;
         agentState.chatModel = '';

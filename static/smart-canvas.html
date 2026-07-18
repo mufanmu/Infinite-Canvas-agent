@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/i18n.js?v=2026.07.15.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784343196">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784343837">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -197,8 +197,10 @@
         <aside id="agentPanel" class="agent-panel">
             <div class="asset-head">
                 <div class="asset-title"><i data-lucide="bot"></i><span data-i18n="smart.agentPanel">AI Agent</span></div>
-                <button id="agentClearBtn" class="asset-mini-btn" type="button" data-i18n-title="smart.agentClearChat" title="清空对话"><i data-lucide="eraser"></i></button>
-                <button id="agentCloseBtn" class="asset-mini-btn" type="button" title="收起" data-i18n-title="common.close"><i data-lucide="chevron-right"></i></button>
+                <button id="agentNewChatBtn" class="asset-mini-btn" type="button" title="新建对话"><i data-lucide="plus"></i></button>
+                <button id="agentChatListBtn" class="asset-mini-btn" type="button" title="对话列表"><i data-lucide="list"></i></button>
+                <button id="agentDeleteChatBtn" class="asset-mini-btn" type="button" title="删除当前对话"><i data-lucide="trash-2"></i></button>
+                <button id="agentCloseBtn" class="asset-mini-btn" type="button" title="关闭" data-i18n-title="common.close"><i data-lucide="x"></i></button>
             </div>
             <div class="agent-models" style="display:none">
                 <select id="agentChatProvider" class="agent-select"></select>
@@ -228,6 +230,7 @@
                     <option value="4">4</option>
                 </select>
             </div>
+            <div id="agentChatListPanel" class="agent-chat-list-panel" hidden></div>
             <div id="agentMessages" class="agent-messages"></div>
             <div class="agent-input-area">
                 <div class="agent-onebox">
@@ -535,6 +538,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784343264"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784343978"></script>
 </body>
 </html>
