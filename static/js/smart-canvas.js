@@ -16709,7 +16709,7 @@ Rules:
 - If the user's request is vague or missing key info (topic, style, purpose), ask 1-3 clarifying questions in "reply" and return "generations": [].
 - In "reply", feel free to explain your reasoning or offer multiple options when appropriate.
 - When the user asks for multiple ideas/options, present them in "reply" and let the user choose before generating.
-- When the user clicks "修改" (modify), they want you to revise the prompt based on their feedback and ask for confirmation again. Do not generate images yet, wait for the user to confirm.`;
+- When the user clicks "重新生成提示词" (regenerate prompt), they want you to revise the prompt based on their feedback and ask for confirmation again. Return "generations": [] and do not generate images yet, wait for the user to confirm.`;
 let agentOpen = false;
 let agentSending = false;
 let agentThinking = false;
@@ -17050,7 +17050,7 @@ function renderAgentMessages(){
                     runAgentGenerations(lastAssistantMsg, lastUserMsg);
                 }
             } else {
-                // 发送文本给 LLM
+                // 发送文本给 LLM（重新生成提示词）
                 if(agentInput){
                     agentInput.value = value;
                     agentInput.focus();
@@ -17320,6 +17320,11 @@ async function sendAgentMessage(){
             return r.json();
         });
         const parsed = parseAgentResponse(result.text || '');
+        // 如果用户点击了"重新生成提示词"，强制将 generations 设为空数组（只返回提示词，不生图）
+        const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+        if(lastUserMsg && String(lastUserMsg.text || '').includes('重新生成提示词')){
+            parsed.generations = [];
+        }
         // 批量完整性检查：用户请求 N 张但 generations 不足时提示
         const requestedCount = chatRequestedImageCount(text);
         if(requestedCount > 0 && parsed.generations.length > 0 && parsed.generations.length < requestedCount){
