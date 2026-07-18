@@ -1237,7 +1237,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-toolbar-btn:hover { color:var(--text); background:var(--soft); }
 .agent-toolbar-btn i,.agent-toolbar-btn svg { width:11px; height:11px; }
 .agent-toolbar-spacer { flex:1; }
-.agent-dropdown-panel { position:absolute; bottom:100%; left:0; right:auto; min-width:200px; max-width:calc(100vw - 60px); margin-bottom:6px; border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:60; padding:8px; display:flex; flex-direction:column; gap:6px; }
+.agent-dropdown-panel { position:fixed; min-width:200px; max-width:calc(100vw - 60px); border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:100; padding:8px; display:flex; flex-direction:column; gap:6px; }
 .agent-dropdown-panel[hidden] { display:none; }
 .agent-dropdown-row { display:flex; align-items:center; gap:6px; }
 .agent-dropdown-row label { flex:0 0 36px; font-size:10px; font-weight:750; color:var(--muted); }
@@ -1245,8 +1245,23 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-dropdown-selects select { flex:1; min-width:0; height:26px; border-radius:8px; border:1px solid var(--line); background:var(--soft); color:var(--text); font-size:10px; font-weight:650; padding:0 6px; outline:none; }
 .agent-dropdown-selects select:focus { border-color:var(--strong); }
 
+/* 比例图标 */
+.agent-ratio-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:5px; }
+.agent-ratio-btn { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; height:52px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:var(--muted); font-size:9.5px; font-weight:700; cursor:pointer; transition:border-color .14s ease, color .14s ease, background .14s ease; padding:6px 4px; }
+.agent-ratio-btn:hover { border-color:var(--strong); color:var(--text); }
+.agent-ratio-btn.active { border-color:var(--strong); background:var(--soft); color:var(--text); }
+.agent-ratio-icon { display:block; width:20px; max-height:24px; border:1.5px solid currentColor; border-radius:3px; }
+.agent-res-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:5px; }
+.agent-res-btn { height:30px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:var(--muted); font-size:9.5px; font-weight:700; cursor:pointer; transition:border-color .14s ease, color .14s ease, background .14s ease; }
+.agent-res-btn:hover { border-color:var(--strong); color:var(--text); }
+.agent-res-btn.active { border-color:var(--strong); background:var(--soft); color:var(--text); }
+
+/* 顶部按钮文字描述 */
+.agent-head-btn { display:inline-flex; align-items:center; gap:3px; height:auto; padding:3px 6px; border-radius:7px; font-size:9px; font-weight:700; }
+.agent-head-btn span { line-height:1; }
+
 /* 参数面板（OneBox 风格） */
-.agent-params-panel { min-width:260px; padding:12px; gap:14px; left:auto; right:0; }
+.agent-params-panel { min-width:280px; padding:12px; gap:14px; }
 .agent-params-section { display:flex; flex-direction:column; gap:6px; }
 .agent-params-title { font-size:10px; font-weight:750; color:var(--muted); }
 .agent-quality-seg { display:flex; border-radius:10px; background:var(--soft); border:1px solid var(--line); overflow:hidden; }

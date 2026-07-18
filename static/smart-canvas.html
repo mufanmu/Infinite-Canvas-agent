@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/i18n.js?v=2026.07.15.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784344585">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784345054">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -197,10 +197,10 @@
         <aside id="agentPanel" class="agent-panel">
             <div class="asset-head">
                 <div class="asset-title"><i data-lucide="bot"></i><span data-i18n="smart.agentPanel">AI Agent</span></div>
-                <button id="agentNewChatBtn" class="asset-mini-btn" type="button" title="新建对话"><i data-lucide="plus"></i></button>
-                <button id="agentChatListBtn" class="asset-mini-btn" type="button" title="对话列表"><i data-lucide="list"></i></button>
-                <button id="agentDeleteChatBtn" class="asset-mini-btn" type="button" title="删除当前对话"><i data-lucide="trash-2"></i></button>
-                <button id="agentCloseBtn" class="asset-mini-btn" type="button" title="关闭" data-i18n-title="common.close"><i data-lucide="x"></i></button>
+                <button id="agentNewChatBtn" class="asset-mini-btn agent-head-btn" type="button" title="新建对话"><i data-lucide="plus"></i><span>新建</span></button>
+                <button id="agentChatListBtn" class="asset-mini-btn agent-head-btn" type="button" title="对话列表"><i data-lucide="list"></i><span>对话</span></button>
+                <button id="agentDeleteChatBtn" class="asset-mini-btn agent-head-btn" type="button" title="删除当前对话"><i data-lucide="trash-2"></i><span>删除</span></button>
+                <button id="agentCloseBtn" class="asset-mini-btn agent-head-btn" type="button" title="关闭" data-i18n-title="common.close"><i data-lucide="x"></i><span>关闭</span></button>
             </div>
             <div class="agent-models" style="display:none">
                 <select id="agentChatProvider" class="agent-select"></select>
@@ -258,29 +258,39 @@
                                     </div>
                                 </div>
                                 <div class="agent-params-section">
-                                    <div class="agent-params-title">Size</div>
-                                    <div class="agent-size-grid" id="agentSizeGrid">
-                                        <button class="agent-size-btn active" type="button" data-ratio="square" data-res="1k">1:1</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="landscape" data-res="1k">3:2</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="portrait" data-res="1k">2:3</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="landscape43" data-res="1k">4:3</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="portrait43" data-res="1k">3:4</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="story" data-res="1k">9:16</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="wide" data-res="1k">16:9</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="square" data-res="2k">1:1(2k)</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="wide" data-res="2k">16:9(2k)</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="story" data-res="2k">9:16(2k)</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="wide" data-res="4k">16:9(4k)</button>
-                                        <button class="agent-size-btn" type="button" data-ratio="story" data-res="4k">9:16(4k)</button>
+                                    <div class="agent-params-title">比例</div>
+                                    <div class="agent-ratio-grid" id="agentRatioGrid">
+                                        <button class="agent-ratio-btn active" type="button" data-ratio="square"><span class="agent-ratio-icon" style="aspect-ratio:1/1"></span><span>1:1</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="landscape"><span class="agent-ratio-icon" style="aspect-ratio:3/2"></span><span>3:2</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="portrait"><span class="agent-ratio-icon" style="aspect-ratio:2/3"></span><span>2:3</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="landscape43"><span class="agent-ratio-icon" style="aspect-ratio:4/3"></span><span>4:3</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="portrait43"><span class="agent-ratio-icon" style="aspect-ratio:3/4"></span><span>3:4</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="story"><span class="agent-ratio-icon" style="aspect-ratio:9/16"></span><span>9:16</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="wide"><span class="agent-ratio-icon" style="aspect-ratio:16/9"></span><span>16:9</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="ultrawide"><span class="agent-ratio-icon" style="aspect-ratio:21/9"></span><span>21:9</span></button>
+                                        <button class="agent-ratio-btn" type="button" data-ratio="ultratall"><span class="agent-ratio-icon" style="aspect-ratio:9/21"></span><span>9:21</span></button>
                                     </div>
                                 </div>
                                 <div class="agent-params-section">
-                                    <div class="agent-params-title">Image</div>
+                                    <div class="agent-params-title">分辨率</div>
+                                    <div class="agent-res-grid" id="agentResGrid">
+                                        <button class="agent-res-btn" type="button" data-res="auto">auto</button>
+                                        <button class="agent-res-btn active" type="button" data-res="1k">1K</button>
+                                        <button class="agent-res-btn" type="button" data-res="2k">2K</button>
+                                        <button class="agent-res-btn" type="button" data-res="4k">4K</button>
+                                    </div>
+                                </div>
+                                <div class="agent-params-section">
+                                    <div class="agent-params-title">数量</div>
                                     <div class="agent-count-grid" id="agentCountGrid">
-                                        <button class="agent-count-btn active" type="button" data-count="1">1 img</button>
-                                        <button class="agent-count-btn" type="button" data-count="2">2 img</button>
-                                        <button class="agent-count-btn" type="button" data-count="3">3 img</button>
-                                        <button class="agent-count-btn" type="button" data-count="4">4 img</button>
+                                        <button class="agent-count-btn active" type="button" data-count="1">1</button>
+                                        <button class="agent-count-btn" type="button" data-count="2">2</button>
+                                        <button class="agent-count-btn" type="button" data-count="3">3</button>
+                                        <button class="agent-count-btn" type="button" data-count="4">4</button>
+                                        <button class="agent-count-btn" type="button" data-count="5">5</button>
+                                        <button class="agent-count-btn" type="button" data-count="6">6</button>
+                                        <button class="agent-count-btn" type="button" data-count="7">7</button>
+                                        <button class="agent-count-btn" type="button" data-count="8">8</button>
                                     </div>
                                 </div>
                             </div>
@@ -538,6 +548,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784344551"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784345143"></script>
 </body>
 </html>

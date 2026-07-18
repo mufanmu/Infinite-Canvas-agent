@@ -16672,7 +16672,7 @@ const AGENT_STORAGE_PREFIX = 'smart_agent_v1:';
 const AGENT_SKILL_MAX_BYTES = 512 * 1024;
 const AGENT_HISTORY_MAX = 20;
 const AGENT_LLM_IMAGE_MAX = 8;
-const AGENT_GEN_MAX_PER_MSG = 4;
+const AGENT_GEN_MAX_PER_MSG = 8;
 const AGENT_MSG_MAX = 60;
 const AGENT_NL = String.fromCharCode(10);
 const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent inside an infinite-canvas app. If a skill document is provided above, follow its style and rules closely.
@@ -16684,10 +16684,10 @@ Rules:
 - "reply": text shown to the user, written in the user's language.
 - "generations": images to generate right away. Use [] when no image is needed (questions, chat, prompt discussion).
 - "prompt": detailed, self-contained image prompt written in English unless the skill says otherwise.
-- "count": integer 1 to 4.
+- "count": integer 1 to 8.
 - "use_last_outputs": true when the request refers to or modifies the most recently generated images (they are shown to you and will be used as reference images).
 - "use_attachments": true when the request refers to or modifies images the user attached.
-- At most 4 generation items.
+- At most 8 generation items.
 - If the user's request is vague or missing key info (topic, style, purpose), ask 1-3 clarifying questions in "reply" and return "generations": [].
 - In "reply", feel free to explain your reasoning or offer multiple options when appropriate.
 - When the user asks for multiple ideas/options, present them in "reply" and let the user choose before generating.`;
@@ -16856,9 +16856,13 @@ function agentSyncParamsPanel(){
     const res = agentState.genResolution || '1k';
     const count = agentState.genCount || 1;
     const quality = agentState.genQuality || '';
-    // 同步 Size 网格
-    document.querySelectorAll('.agent-size-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.ratio === ratio && btn.dataset.res === res);
+    // 同步比例网格
+    document.querySelectorAll('.agent-ratio-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.ratio === ratio);
+    });
+    // 同步分辨率网格
+    document.querySelectorAll('.agent-res-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.res === res);
     });
     // 同步数量网格
     document.querySelectorAll('.agent-count-btn').forEach(btn => {
@@ -17173,7 +17177,7 @@ function parseAgentResponse(raw){
             const generations = (Array.isArray(data.generations) ? data.generations : [])
                 .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
                 .slice(0, AGENT_GEN_MAX_PER_MSG)
-                .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(4, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
+                .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
             return {reply, generations};
         } catch(e) { /* 尝试下一个候选 */ }
     }
@@ -17433,17 +17437,24 @@ function initAgentPanel(){
         if(modelPanel) modelPanel.hidden = true;
         if(paramsPanel) paramsPanel.hidden = true;
     }
+    function showDropdown(btn, panel){
+        if(!btn || !panel) return;
+        const rect = btn.getBoundingClientRect();
+        panel.style.left = Math.max(8, rect.left) + 'px';
+        panel.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+        panel.hidden = false;
+    }
     modelBtn?.addEventListener('click', e => {
         e.stopPropagation();
         const wasHidden = modelPanel?.hidden;
         closeAllDropdowns();
-        if(wasHidden && modelPanel) modelPanel.hidden = false;
+        if(wasHidden) showDropdown(modelBtn, modelPanel);
     });
     paramsBtn?.addEventListener('click', e => {
         e.stopPropagation();
         const wasHidden = paramsPanel?.hidden;
         closeAllDropdowns();
-        if(wasHidden && paramsPanel) paramsPanel.hidden = false;
+        if(wasHidden) showDropdown(paramsBtn, paramsPanel);
     });
     document.addEventListener('pointerdown', e => {
         if(!e.target.closest('.agent-toolbar-dropdown-wrap')) closeAllDropdowns();
@@ -17481,10 +17492,17 @@ function initAgentPanel(){
     });
     agentGenModel?.addEventListener('change', () => { agentState.genModel = agentGenModel.value; agentUpdateToolbarLabels(); saveAgentState(); });
     // 参数面板交互
-    document.getElementById('agentSizeGrid')?.addEventListener('click', e => {
-        const btn = e.target.closest('.agent-size-btn');
+    document.getElementById('agentRatioGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-ratio-btn');
         if(!btn || !agentState) return;
         agentState.genRatio = btn.dataset.ratio || 'square';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentResGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-res-btn');
+        if(!btn || !agentState) return;
         agentState.genResolution = btn.dataset.res || '1k';
         agentSyncParamsPanel();
         agentUpdateToolbarLabels();
