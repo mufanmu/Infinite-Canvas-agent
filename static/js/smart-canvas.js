@@ -16989,11 +16989,36 @@ function agentGenCardHtml(gen){
     const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer">`).join('');
     return `<div class="agent-gen-card"><div class="agent-gen-prompt">${escapeHtml(gen.prompt || '')}</div><div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${refTags ? ' · ' + escapeHtml(refTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
 }
+function agentDetectOptions(text){
+    if(!text) return [];
+    const t = String(text).toLowerCase();
+    const options = [];
+    // 检测确认类关键词
+    if(t.includes('确认') || t.includes('认可') || t.includes('同意') || t.includes('好的') || t.includes('可以')){
+        options.push({label:'确认', value:'确认'});
+    }
+    // 检测修改类关键词
+    if(t.includes('修改') || t.includes('调整') || t.includes('改变') || t.includes('重写') || t.includes('重新')){
+        options.push({label:'修改', value:'修改'});
+    }
+    // 检测取消类关键词
+    if(t.includes('取消') || t.includes('不要') || t.includes('放弃') || t.includes('停止')){
+        options.push({label:'取消', value:'取消'});
+    }
+    // 检测继续类关键词
+    if(t.includes('继续') || t.includes('下一步') || t.includes('接着')){
+        options.push({label:'继续', value:'继续'});
+    }
+    return options;
+}
 function agentMessageHtml(msg){
     const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
     const gens = (msg.generations || []).map(agentGenCardHtml).join('');
     const actions = msg.text ? `<div class="agent-msg-actions"><button class="agent-msg-action-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}" title="复制"><i data-lucide="copy"></i></button>${msg.role === 'assistant' ? `<button class="agent-msg-action-btn" type="button" data-agent-retry="${escapeHtml(msg.id)}" title="重试"><i data-lucide="refresh-cw"></i></button>` : ''}</div>` : '';
-    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${actions}</div>`;
+    // 关键词检测选项按钮（仅 assistant 消息）
+    const options = msg.role === 'assistant' ? agentDetectOptions(msg.text) : [];
+    const optionsHtml = options.length ? `<div class="agent-msg-options">${options.map(opt => `<button class="agent-msg-option-btn" type="button" data-agent-option="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</button>`).join('')}</div>` : '';
+    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${optionsHtml}${actions}</div>`;
 }
 function renderAgentMessages(){
     if(!agentMessages || !agentState) return;
@@ -17030,6 +17055,19 @@ function renderAgentMessages(){
     if(newChatBtn) newChatBtn.disabled = agentSending;
     if(chatListBtn) chatListBtn.disabled = agentSending;
     if(moreBtn) moreBtn.disabled = agentSending;
+    // 绑定选项按钮事件
+    agentMessages.querySelectorAll('[data-agent-option]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const value = btn.dataset.agentOption;
+            if(agentInput){
+                agentInput.value = value;
+                agentInput.focus();
+            }
+            sendAgentMessage();
+        };
+    });
     // 绑定生成图片点击跳转事件
     agentMessages.querySelectorAll('[data-agent-gen-jump]').forEach(img => {
         img.onclick = e => {
@@ -17326,8 +17364,7 @@ function agentCenterOnNode(node){
     agentCenterOnPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
 }
 function agentFindEmptyPosition(count=1){
-    // A+C 方案：计算空白区域 + 右侧追加
-    // 找到画布上所有图片节点的边界
+    // A+C 方案：计算空白区域 + 右侧追加（水平排列）
     const imageNodes = (nodes || []).filter(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url));
     const center = viewportCenter();
     if(!imageNodes.length) return {x:center.x, y:center.y};
@@ -17340,9 +17377,9 @@ function agentFindEmptyPosition(count=1){
         if(right > maxX){ maxX = right; maxXNode = n; }
     });
     if(!maxXNode) return {x:center.x, y:center.y};
-    // 在最右边节点的右侧放置新图，垂直方向与最右边节点对齐
+    // 在最右边节点的右侧水平放置新图，垂直方向与最右边节点对齐
     const rect = nodeRect(maxXNode);
-    const gap = 60;
+    const gap = 40;
     return {x:rect.x + rect.width + gap + 130, y:rect.y + rect.height / 2};
 }
 async function runAgentGenerations(assistantMsg, userMsg){
@@ -17365,8 +17402,7 @@ async function runAgentGenerations(assistantMsg, userMsg){
     const lastResults = agentLastResults();
     const currentAttach = (userMsg?.images || []).filter(i => i?.url);
     const attachRefs = currentAttach.length ? currentAttach : agentLastUserAttachments();
-    let offset = 0;
-    for(const gen of gens){
+    await Promise.all(gens.map(async gen => {
         gen.status = 'running';
         renderAgentMessages();
         try {
@@ -17402,7 +17438,7 @@ async function runAgentGenerations(assistantMsg, userMsg){
         }
         renderAgentMessages();
         saveAgentState();
-    }
+    }));
     render();
     scheduleSave();
 }
