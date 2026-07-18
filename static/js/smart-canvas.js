@@ -5270,6 +5270,7 @@ function connectAssetLibrarySyncSocket(){
                 const data = JSON.parse(event.data);
                 if(data?.type === 'asset_library_updated') handleAssetLibraryUpdatedMessage(data);
                 if(data?.type === 'canvas_updated') handleCanvasUpdatedMessage(data);
+                if(data?.type === 'canvas_task_done') handleCanvasTaskDoneMessage(data);
             } catch(e) {}
         };
         socket.onclose = () => {
@@ -15205,14 +15206,31 @@ function resumeJimengPendingNodes(){
         startJimengPoll(n);
     });
 }
+// WebSocket 实时任务完成通知：消除轮询延迟
+const _canvasTaskWaiters = new Map();
+function handleCanvasTaskDoneMessage(data){
+    const taskId = data?.task_id;
+    const status = data?.status;
+    if(!taskId) return;
+    const waiter = _canvasTaskWaiters.get(taskId);
+    if(waiter) waiter(status);
+}
 async function pollSmartCanvasTask(taskId){
     if(!taskId) throw new Error(tr('smart.errRunFailed'));
     if(activeSmartTaskPolls.has(taskId)) return activeSmartTaskPolls.get(taskId);
     const promise = (async () => {
         for(let i = 0; i < 900; i++){
-            // 动态轮询间隔：前5次快速轮询（500ms），之后逐步增加到 2000ms
+            // 注册 WebSocket 等待器：收到任务完成通知时立即查询，无需等轮询间隔
+            const wsNotify = new Promise(resolve => {
+                _canvasTaskWaiters.set(taskId, (status) => resolve(status || 'done'));
+            });
+            // 同时设置超时轮询作为保底
             const pollInterval = i < 5 ? 500 : i < 15 ? 1000 : 2000;
-            await new Promise(resolve => setTimeout(resolve, pollInterval));
+            const timeout = new Promise(resolve => setTimeout(() => resolve('poll'), pollInterval));
+            // 哪个先触发就用哪个
+            const trigger = await Promise.race([wsNotify, timeout]);
+            _canvasTaskWaiters.delete(taskId);
+            // 如果是 WebSocket 通知触发，立即查询；如果是超时触发，也查询
             const task = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`).then(async r => {
                 if(!r.ok) throw new Error(await r.text());
                 return r.json();
@@ -15232,6 +15250,7 @@ async function pollSmartCanvasTask(taskId){
         return await promise;
     } finally {
         activeSmartTaskPolls.delete(taskId);
+        _canvasTaskWaiters.delete(taskId);
     }
 }
 function finalizeSmartPendingTask(node, taskId, images, kind='image'){
@@ -16694,89 +16713,22 @@ const AGENT_LLM_IMAGE_MAX = 8;
 const AGENT_GEN_MAX_PER_MSG = 8;
 const AGENT_MSG_MAX = 60;
 const AGENT_NL = String.fromCharCode(10);
-const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent inside an infinite-canvas app. If a skill document is provided above, follow its style and rules closely.
+const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent. Reply with raw JSON only (no markdown, no extra text):
+{"reply":"回复用户的话","options":[],"prompts":[],"generations":[{"prompt":"详细中文提示词","count":1,"use_last_outputs":false,"use_attachments":false}]}
 
-You MUST reply with a raw JSON object only. No markdown fences, no explanation, no extra text:
-{"reply":"your conversational reply","options":[],"prompts":[],"generations":[{"prompt":"详细的中文生图提示词","count":1,"use_last_outputs":false,"use_attachments":false}]}
+Fields: "reply"=对话回复; "options"=[{label,value}]按钮; "prompts"=待确认的中文提示词; "generations"=立即生成的图片(最多8项). "use_last_outputs":引用/修改上一轮图片时true; "use_attachments":引用/修改用户上传图时true.
 
-## Field Reference
-- "reply": text shown to the user, written in the user's language.
-- "options": array of action buttons shown below your reply. Each option has "label" (button text) and "value" (text sent when clicked). Omit or use [] when no buttons are needed.
-- "prompts": prompt strings used when you propose a plan but wait for user confirmation. Each prompt should be a detailed, self-contained image prompt written in Chinese.
-- "generations": images to generate right away. Use [] when no image is needed.
-- "prompt": detailed, self-contained image prompt written in Chinese (中文). Include subject, style, composition, lighting, colors, details, and atmosphere.
-- "count": integer 1 to 8.
-- "use_last_outputs": true when the request refers to or modifies the most recently generated images.
-- "use_attachments": true when the request refers to or modifies images the user attached.
-- At most 8 generation items.
-
-## Core Principle: Generate, don't ask
-The goal is to help users get images, not to have conversations. Follow these rules strictly:
-1. If the user's request has a clear subject (what to draw) AND enough detail (style, scene, or features) → EXPAND the prompt and GENERATE immediately (Pattern 1). Do NOT ask for confirmation.
-2. If the user just selected an option or answered a clarification question → their request is now clear → GENERATE immediately (Pattern 1). Do NOT ask "确认要生成吗？" — that is meaningless and wastes a turn.
-3. Only ask questions when you genuinely cannot form a reasonable plan (Pattern 3 or 4).
-4. NEVER reply with only "你确认要生成...吗？" without providing a full detailed prompt. If you want to confirm, you MUST include the complete prompt in "prompts" so the user can review it (Pattern 2).
-
-## Response Patterns — choose the right one each time
-
-### Pattern 1: DIRECT GENERATION (default — use this whenever possible)
-The user gave enough detail, OR just answered a clarification question, OR just selected an option. Expand their request into a detailed Chinese prompt and generate right away.
-- "generations": [{"prompt":"你的详细中文提示词","count":1}]
-- "options": []
-- "prompts": []
-- "reply": brief description of what you're generating (e.g., "好的，正在为您生成一条守护青铜鼎的红色龙...")
-Triggers: "画一只橘猫坐在窗台上" / user selected "红色龙守护青铜鼎" / user answered "卡通风格"
-
-### Pattern 2: CONFIRM WITH FULL PROMPT (use sparingly — only when the plan is complex and user might want to adjust)
-You have a specific plan but it involves many creative choices the user might want to tweak. You MUST provide the FULL detailed Chinese prompt in "prompts" for the user to review — NOT just ask "确认吗？".
-- "prompts": ["完整的中文提示词，包含主体、风格、构图、光线、色彩、细节、氛围"]
-- "options": [{"label":"确认","value":"确认"},{"label":"修改","value":"修改"}]
-- "generations": []
-- "reply": the full prompt text, so the user can read it
-IMPORTANT: If you can't provide a meaningfully different or expanded prompt beyond what the user already said, use Pattern 1 instead.
-
-### Pattern 3: MULTIPLE CHOICE (request is vague, several distinct directions possible)
-The user's request is too vague to form a single plan. Put each choice as a SEPARATE button. After the user selects one → go to Pattern 1 (generate directly).
-- "options": [
-    {"label":"盘旋云端的金色龙","value":"我要生成一条盘旋于云端的金色龙"},
-    {"label":"飞越山川的蓝色龙","value":"我要生成一条飞越山川的蓝色龙"},
-    {"label":"守护宫殿的红色龙","value":"我要生成一条守护宫殿的红色龙"}
-  ]
-- "reply": a short question like "您希望生成哪种龙？"
-- "generations": []
-- "prompts": []
-IMPORTANT: After the user clicks an option, do NOT ask for confirmation again — generate directly using Pattern 1.
-
-### Pattern 4: CLARIFY (critical info is missing, cannot form options)
-The request is missing critical info and you cannot guess 2-3 reasonable options. Ask 1-3 short questions.
-- "reply": your questions
-- "options": []
-- "generations": []
-- "prompts": []
-Example: "画一个角色" → ask: male or female? what style? what scene?
-
-### Pattern 5: BATCH GENERATION (user asks for multiple different images)
-- "generations": [{prompt: "中文提示词1", count:1}, {prompt: "中文提示词2", count:1}, ...]
-- "options": []
-
-## How to choose
-- User request has subject + any detail → Pattern 1 (expand and generate)
-- User just selected an option or answered a question → Pattern 1 (generate now)
-- User request is vague, multiple distinct directions → Pattern 3 (offer choices)
-- User request is missing critical info, can't form options → Pattern 4 (ask)
-- User asks for N different images → Pattern 5
-- AVOID Pattern 2 unless the plan is truly complex and the prompt adds significant value beyond what the user said
-
-## Important rules
-- All prompts MUST be written in Chinese (中文). Include 主体、风格、构图、光线、色彩、细节、氛围.
-- When the user uploads a character reference image, remember the character's appearance and maintain consistency in all subsequent generations.
-- When a skill document is provided, follow its style rules strictly.
-- When the user refers to a previous image (e.g., "把背景换成蓝色", "修改这张"), use "use_last_outputs": true.
-- When generating multiple images, ensure each prompt is sufficiently different.
-- When the user specifies image parameters (e.g., "16:9", "高清", "4K"), include these in the prompt.
-- When the user asks to convert an image to a different style (e.g., "把这张照片转成小黑风格"), describe the target style in detail in the prompt.
-- NEVER ask "确认要生成吗？" without providing a full prompt. This is the most important rule.
-- When the user asks about an image's content (e.g., "这张图里有什么", "描述一下这张图"), analyze the image and provide a detailed description.`;
+核心原则：能生成就生成，不要问。
+- 用户有明确主体+任何细节 → 扩写prompt并立即生成(generations)
+- 用户刚选了选项或回答了问题 → 立即生成，不要再确认
+- 请求模糊有多个方向 → 给2-4个选项(options)，用户选后立即生成
+- 关键信息缺失无法给选项 → 问1-3个短问题(reply)
+- 用户要多张不同图 → generations放多项
+- 所有prompt必须中文，包含主体/风格/构图/光线/色彩/细节/氛围
+- 用户提到修改上一张图(如"换个背景"、"改成像素风") → use_last_outputs:true
+- 用户上传角色参考图 → 后续生成保持角色一致性
+- 有skill文档时遵循其风格规则
+- 不要只问"确认要生成吗"而不给完整prompt`;
 let agentOpen = false;
 let agentSending = false;
 let agentThinking = false;

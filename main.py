@@ -160,6 +160,15 @@ class ConnectionManager:
                 print(f"Broadcast asset library error: {e}")
                 self.active_connections.remove(connection)
 
+    async def broadcast_canvas_task_done(self, task_id: str, status: str):
+        data = json.dumps({"type": "canvas_task_done", "task_id": task_id, "status": status})
+        for connection in self.active_connections[:]:
+            try:
+                await connection.send_text(data)
+            except Exception as e:
+                print(f"Broadcast canvas task done error: {e}")
+                self.active_connections.remove(connection)
+
     async def send_personal_message(self, message: dict, client_id: str):
         ws = self.user_connections.get(client_id)
         if ws:
@@ -13388,6 +13397,10 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
                 "error": "",
                 "updated_at": time.time(),
             })
+        try:
+            await manager.broadcast_canvas_task_done(task_id, "succeeded")
+        except Exception:
+            pass
     except JimengPendingError as exc:
         # 即梦云端还在排队：标记为 jimeng_pending，前端据 submit_id 持久续查（任务未丢失）
         info = jimeng_pending_payload(exc)
@@ -13402,6 +13415,10 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
                 "error": "",
                 "updated_at": time.time(),
             })
+        try:
+            await manager.broadcast_canvas_task_done(task_id, "jimeng_pending")
+        except Exception:
+            pass
     except Exception as exc:
         detail = getattr(exc, "detail", None) or str(exc)
         status_code = getattr(exc, "status_code", 500)
@@ -13414,6 +13431,10 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
                 "upstream_task_id": upstream_task_id,
                 "updated_at": time.time(),
             })
+        try:
+            await manager.broadcast_canvas_task_done(task_id, "failed")
+        except Exception:
+            pass
 
 @app.post("/api/canvas-image-tasks")
 async def create_canvas_image_task(payload: OnlineImageRequest):
