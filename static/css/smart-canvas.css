@@ -1266,6 +1266,14 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-send-btn i,.agent-send-btn svg { width:13px; height:13px; }
 .agent-panel.drag-over-input .agent-onebox { border-color:var(--strong); }
 
+/* 图片附件引用（OneBox 风格：缩略图+名称+点击跳转） */
+.agent-attach-ref { position:relative; display:flex; align-items:center; gap:6px; height:32px; padding:0 24px 0 4px; border-radius:8px; border:1px solid var(--line); background:var(--card); max-width:160px; cursor:pointer; transition:border-color .14s ease, background .14s ease; }
+.agent-attach-ref:hover { border-color:var(--strong); background:var(--soft); }
+.agent-attach-ref img { width:24px; height:24px; border-radius:6px; object-fit:cover; flex:0 0 auto; }
+.agent-attach-ref-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; font-weight:650; color:var(--text); }
+.agent-attach-ref button { position:absolute; top:2px; right:2px; width:14px; height:14px; border-radius:50%; background:rgba(15,23,42,.78); color:#fff; display:flex; align-items:center; justify-content:center; border:none; cursor:pointer; padding:0; }
+.agent-attach-ref button i,.agent-attach-ref button svg { width:8px; height:8px; }
+
 /* Skill 附件卡片（在附件行中） */
 .agent-attach-skill { position:relative; display:flex; align-items:center; gap:6px; height:44px; padding:0 28px 0 8px; border-radius:10px; border:1px solid var(--line); background:var(--card); max-width:160px; }
 .agent-attach-skill > i,.agent-attach-skill > svg { width:14px; height:14px; color:var(--strong); flex:0 0 auto; }

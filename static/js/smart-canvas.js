@@ -16896,7 +16896,8 @@ function renderAgentAttachments(){
         html += `<div class="agent-attach-skill"><i data-lucide="file-text"></i><span class="agent-attach-skill-name">${escapeHtml(skill.name || 'skill.md')}</span><button type="button" data-agent-skill-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     attachments.forEach((att, i) => {
-        html += `<div class="agent-attach-chip"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
+        const name = String(att.name || 'image').length > 12 ? String(att.name || 'image').slice(0, 12) + '...' : String(att.name || 'image');
+        html += `<div class="agent-attach-ref" data-agent-att-jump="${i}" title="${escapeHtml(att.name || 'image')}"><img src="${escapeHtml(att.url)}" alt=""><span class="agent-attach-ref-name">${escapeHtml(name)}</span><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     agentAttachRow.innerHTML = html;
     if(window.lucide) lucide.createIcons();
@@ -16914,6 +16915,28 @@ function renderAgentAttachments(){
             agentState.attachments.splice(Number(btn.dataset.agentAttRemove) || 0, 1);
             renderAgentAttachments();
             saveAgentState();
+        };
+    });
+    agentAttachRow.querySelectorAll('[data-agent-att-jump]').forEach(el => {
+        el.onclick = e => {
+            if(e.target.closest('[data-agent-att-remove]')) return;
+            const att = agentState.attachments[Number(el.dataset.agentAttJump)];
+            if(!att) return;
+            // 跳转到画布中图片位置
+            if(att.nodeId){
+                const node = (nodes || []).find(n => n.id === att.nodeId);
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    centerViewportOnWorldPoint({x:Number(node.x) || 0, y:Number(node.y) || 0});
+                    render();
+                    return;
+                }
+            }
+            // 没有 nodeId 时用坐标跳转
+            if(att.x || att.y){
+                centerViewportOnWorldPoint({x:Number(att.x) || 0, y:Number(att.y) || 0});
+            }
         };
     });
 }
@@ -17289,7 +17312,7 @@ function agentCanvasImages(){
     (nodes || []).forEach(node => {
         if(!isSmartImageNode(node)) return;
         (node.images || []).forEach(img => {
-            if(img?.url) items.push({url:img.url, name:img.name || node.title || 'image', nodeId:node.id, nodeTitle:node.title || '', ts:Number(node.created_at) || 0});
+            if(img?.url) items.push({url:img.url, name:img.name || node.title || 'image', nodeId:node.id, nodeTitle:node.title || '', x:Number(node.x) || 0, y:Number(node.y) || 0, ts:Number(node.created_at) || 0});
         });
     });
     return items.sort((a, b) => b.ts - a.ts);
@@ -17308,13 +17331,13 @@ function showAgentMention(filter){
     agentMentionIdx = 0;
     panel.innerHTML = filtered.slice(0, 20).map((img, i) => {
         const time = img.ts ? new Date(img.ts).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) : '';
-        return `<button class="agent-mention-item${i === 0 ? ' active' : ''}" type="button" data-mention-url="${escapeHtml(img.url)}" data-mention-name="${escapeHtml(img.name)}"><img src="${escapeHtml(img.url)}" alt="" loading="lazy"><div class="agent-mention-item-info"><div class="agent-mention-item-name">${escapeHtml(img.name)}</div><div class="agent-mention-item-time">${escapeHtml(time)}</div></div></button>`;
+        return `<button class="agent-mention-item${i === 0 ? ' active' : ''}" type="button" data-mention-url="${escapeHtml(img.url)}" data-mention-name="${escapeHtml(img.name)}" data-mention-node-id="${escapeHtml(img.nodeId || '')}" data-mention-x="${img.x || 0}" data-mention-y="${img.y || 0}"><img src="${escapeHtml(img.url)}" alt="" loading="lazy"><div class="agent-mention-item-info"><div class="agent-mention-item-name">${escapeHtml(img.name)}</div><div class="agent-mention-item-time">${escapeHtml(time)}</div></div></button>`;
     }).join('');
     panel.hidden = false;
     panel.querySelectorAll('.agent-mention-item').forEach(btn => {
         btn.onclick = e => {
             e.preventDefault();
-            insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName);
+            insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName, btn.dataset.mentionNodeId, btn.dataset.mentionX, btn.dataset.mentionY);
         };
     });
 }
@@ -17323,11 +17346,11 @@ function hideAgentMention(){
     if(panel) panel.hidden = true;
     agentMentionIdx = -1;
 }
-function insertAgentMention(url, name){
+function insertAgentMention(url, name, nodeId, x, y){
     if(!agentState || !url) return;
     if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
     if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX && !agentState.attachments.some(a => a.url === url)){
-        agentState.attachments.push({url, name: name || 'canvas-image'});
+        agentState.attachments.push({url, name: name || 'canvas-image', nodeId: nodeId || '', x: Number(x) || 0, y: Number(y) || 0});
     }
     if(agentInput){
         const val = agentInput.value;
@@ -17354,7 +17377,7 @@ function agentMentionKeydown(e){
     if(e.key === 'Enter' && agentMentionIdx >= 0 && items[agentMentionIdx]){
         e.preventDefault();
         const btn = items[agentMentionIdx];
-        insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName);
+        insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName, btn.dataset.mentionNodeId, btn.dataset.mentionX, btn.dataset.mentionY);
         return true;
     }
     if(e.key === 'Escape'){
