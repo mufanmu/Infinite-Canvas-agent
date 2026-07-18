@@ -1199,20 +1199,35 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-gen-status.done { color:#059669; }
 .agent-gen-spinner { width:12px; height:12px; border-radius:50%; border:2px solid var(--line); border-top-color:var(--strong); animation:agentSpin .8s linear infinite; flex:0 0 auto; }
 @keyframes agentSpin { to { transform:rotate(360deg); } }
-.agent-input-area { display:flex; flex-direction:column; gap:6px; }
-.agent-attach-row { display:flex; flex-wrap:wrap; gap:6px; }
+.agent-input-area { display:flex; flex-direction:column; gap:0; position:relative; }
+.agent-onebox { border:1px solid var(--line); border-radius:16px; background:var(--card); overflow:hidden; transition:border-color .14s ease; }
+.agent-onebox:focus-within { border-color:var(--strong); }
+.agent-attach-row { display:flex; flex-wrap:wrap; gap:6px; padding:8px 10px 0; }
 .agent-attach-row:empty { display:none; }
 .agent-attach-chip { position:relative; width:44px; height:44px; border-radius:10px; overflow:hidden; border:1px solid var(--line); }
 .agent-attach-chip img { width:100%; height:100%; object-fit:cover; display:block; }
 .agent-attach-chip button { position:absolute; top:2px; right:2px; width:15px; height:15px; border-radius:50%; background:rgba(15,23,42,.78); color:#fff; display:flex; align-items:center; justify-content:center; border:none; cursor:pointer; padding:0; }
 .agent-attach-chip button i,.agent-attach-chip button svg { width:9px; height:9px; }
-.agent-input-row { display:flex; align-items:flex-end; gap:7px; }
-.agent-input-row textarea { flex:1; min-width:0; resize:none; max-height:110px; border-radius:13px; border:1px solid var(--line); background:var(--card); color:var(--text); padding:8px 10px; font-size:11.5px; line-height:1.5; outline:none; font-family:inherit; }
-.agent-input-row textarea:focus { border-color:var(--strong); }
-.agent-send-btn { flex:0 0 auto; width:32px; height:32px; border-radius:11px; background:var(--strong); color:var(--strong-text); display:inline-flex; align-items:center; justify-content:center; border:none; cursor:pointer; }
+.agent-onebox textarea { display:block; width:100%; min-width:0; resize:none; max-height:200px; border:none; background:transparent; color:var(--text); padding:8px 12px; font-size:11.5px; line-height:1.5; outline:none; font-family:inherit; }
+.agent-toolbar { display:flex; align-items:center; gap:4px; padding:4px 8px 6px; }
+.agent-toolbar-icon { width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; border:none; background:none; color:var(--muted); cursor:pointer; transition:color .14s ease, background .14s ease; }
+.agent-toolbar-icon:hover { color:var(--text); background:var(--soft); }
+.agent-toolbar-icon i,.agent-toolbar-icon svg { width:14px; height:14px; }
+.agent-toolbar-dropdown-wrap { position:relative; }
+.agent-toolbar-btn { display:inline-flex; align-items:center; gap:3px; height:28px; padding:0 8px; border-radius:8px; border:none; background:none; color:var(--muted); font-size:10.5px; font-weight:650; cursor:pointer; transition:color .14s ease, background .14s ease; white-space:nowrap; }
+.agent-toolbar-btn:hover { color:var(--text); background:var(--soft); }
+.agent-toolbar-btn i,.agent-toolbar-btn svg { width:11px; height:11px; }
+.agent-toolbar-spacer { flex:1; }
+.agent-dropdown-panel { position:absolute; bottom:100%; left:0; min-width:200px; margin-bottom:6px; border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:60; padding:8px; display:flex; flex-direction:column; gap:6px; }
+.agent-dropdown-row { display:flex; align-items:center; gap:6px; }
+.agent-dropdown-row label { flex:0 0 36px; font-size:10px; font-weight:750; color:var(--muted); }
+.agent-dropdown-selects { flex:1; display:flex; gap:4px; }
+.agent-dropdown-selects select { flex:1; min-width:0; height:26px; border-radius:8px; border:1px solid var(--line); background:var(--soft); color:var(--text); font-size:10px; font-weight:650; padding:0 6px; outline:none; }
+.agent-dropdown-selects select:focus { border-color:var(--strong); }
+.agent-send-btn { flex:0 0 auto; width:28px; height:28px; border-radius:9px; background:var(--strong); color:var(--strong-text); display:inline-flex; align-items:center; justify-content:center; border:none; cursor:pointer; }
 .agent-send-btn:disabled { opacity:.45; cursor:not-allowed; }
-.agent-send-btn i,.agent-send-btn svg { width:14px; height:14px; }
-.agent-panel.drag-over-input .agent-input-row textarea { border-color:var(--strong); }
+.agent-send-btn i,.agent-send-btn svg { width:13px; height:13px; }
+.agent-panel.drag-over-input .agent-onebox { border-color:var(--strong); }
 
 /* Skill 附件卡片（在附件行中） */
 .agent-attach-skill { position:relative; display:flex; align-items:center; gap:6px; height:44px; padding:0 28px 0 8px; border-radius:10px; border:1px solid var(--line); background:var(--card); max-width:160px; }

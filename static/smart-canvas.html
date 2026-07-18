@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/i18n.js?v=2026.07.15.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784341297">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784342461">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -200,54 +200,59 @@
                 <button id="agentClearBtn" class="asset-mini-btn" type="button" data-i18n-title="smart.agentClearChat" title="清空对话"><i data-lucide="eraser"></i></button>
                 <button id="agentCloseBtn" class="asset-mini-btn" type="button" title="收起" data-i18n-title="common.close"><i data-lucide="chevron-right"></i></button>
             </div>
-            <div class="agent-models">
-                <div class="agent-model-row">
-                    <span class="agent-model-label" data-i18n="smart.agentChatModel">理解模型</span>
-                    <select id="agentChatProvider" class="agent-select"></select>
-                    <select id="agentChatModel" class="agent-select"></select>
-                </div>
-                <div class="agent-model-row">
-                    <span class="agent-model-label" data-i18n="smart.agentGenModel">生图模型</span>
-                    <select id="agentGenProvider" class="agent-select"></select>
-                    <select id="agentGenModel" class="agent-select"></select>
-                </div>
-                <div class="agent-model-row">
-                    <span class="agent-model-label" data-i18n="smart.agentGenParams">出图参数</span>
-                    <select id="agentGenRatio" class="agent-select">
-                        <option value="square">1:1</option>
-                        <option value="portrait">2:3</option>
-                        <option value="portrait43">3:4</option>
-                        <option value="landscape43">4:3</option>
-                        <option value="landscape">3:2</option>
-                        <option value="story">9:16</option>
-                        <option value="wide">16:9</option>
-                        <option value="ultrawide">21:9</option>
-                        <option value="ultratall">9:21</option>
-                    </select>
-                    <select id="agentGenResolution" class="agent-select">
-                        <option value="1k">1K</option>
-                        <option value="2k">2K</option>
-                        <option value="4k">4K</option>
-                    </select>
-                    <select id="agentGenCount" class="agent-select">
-                        <option value="1" data-i18n="smart.agentCount1">1 张</option>
-                        <option value="2" data-i18n="smart.agentCount2">2 张</option>
-                        <option value="3" data-i18n="smart.agentCount3">3 张</option>
-                        <option value="4" data-i18n="smart.agentCount4">4 张</option>
-                    </select>
-                </div>
-                <label class="agent-autocontext">
-                    <input id="agentAutoContext" type="checkbox" checked>
-                    <span data-i18n="smart.agentAutoContext">对话时自动携带最近生成的图</span>
-                </label>
+            <div class="agent-models" style="display:none">
+                <select id="agentChatProvider" class="agent-select"></select>
+                <select id="agentChatModel" class="agent-select"></select>
+                <select id="agentGenProvider" class="agent-select"></select>
+                <select id="agentGenModel" class="agent-select"></select>
+                <select id="agentGenRatio" class="agent-select">
+                    <option value="square">1:1</option>
+                    <option value="portrait">2:3</option>
+                    <option value="portrait43">3:4</option>
+                    <option value="landscape43">4:3</option>
+                    <option value="landscape">3:2</option>
+                    <option value="story">9:16</option>
+                    <option value="wide">16:9</option>
+                    <option value="ultrawide">21:9</option>
+                    <option value="ultratall">9:21</option>
+                </select>
+                <select id="agentGenResolution" class="agent-select">
+                    <option value="1k">1K</option>
+                    <option value="2k">2K</option>
+                    <option value="4k">4K</option>
+                </select>
+                <select id="agentGenCount" class="agent-select">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                </select>
             </div>
             <div id="agentMessages" class="agent-messages"></div>
             <div class="agent-input-area">
-                <div id="agentAttachRow" class="agent-attach-row"></div>
-                <div class="agent-input-row">
-                    <button id="agentAttachBtn" class="asset-mini-btn" type="button" data-i18n-title="smart.agentAttach" title="添加图片或 Skill"><i data-lucide="paperclip"></i></button>
+                <div class="agent-onebox">
+                    <div id="agentAttachRow" class="agent-attach-row"></div>
                     <textarea id="agentInput" rows="2" data-i18n-placeholder="smart.agentPlaceholder" placeholder="输入需求，@ 引用画布图片..."></textarea>
-                    <button id="agentSendBtn" class="agent-send-btn" type="button" data-i18n-title="smart.agentSend" title="发送"><i data-lucide="send"></i></button>
+                    <div class="agent-toolbar">
+                        <button id="agentAttachBtn" class="agent-toolbar-icon" type="button" data-i18n-title="smart.agentAttach" title="添加图片或 Skill"><i data-lucide="paperclip"></i></button>
+                        <div class="agent-toolbar-dropdown-wrap">
+                            <button id="agentModelBtn" class="agent-toolbar-btn" type="button"><span id="agentModelLabel">模型</span><i data-lucide="chevron-down"></i></button>
+                            <div id="agentModelPanel" class="agent-dropdown-panel" hidden>
+                                <div class="agent-dropdown-row"><label>理解</label><div class="agent-dropdown-selects" id="agentChatSelects"></div></div>
+                                <div class="agent-dropdown-row"><label>生图</label><div class="agent-dropdown-selects" id="agentGenSelects"></div></div>
+                            </div>
+                        </div>
+                        <div class="agent-toolbar-dropdown-wrap">
+                            <button id="agentParamsBtn" class="agent-toolbar-btn" type="button"><span id="agentParamsLabel">16:9 · 1K · 1张</span><i data-lucide="chevron-down"></i></button>
+                            <div id="agentParamsPanel" class="agent-dropdown-panel" hidden>
+                                <div class="agent-dropdown-row"><label>比例</label><div class="agent-dropdown-selects" id="agentRatioSelect"></div></div>
+                                <div class="agent-dropdown-row"><label>分辨率</label><div class="agent-dropdown-selects" id="agentResSelect"></div></div>
+                                <div class="agent-dropdown-row"><label>数量</label><div class="agent-dropdown-selects" id="agentCountSelect"></div></div>
+                            </div>
+                        </div>
+                        <div class="agent-toolbar-spacer"></div>
+                        <button id="agentSendBtn" class="agent-send-btn" type="button" data-i18n-title="smart.agentSend" title="发送"><i data-lucide="send"></i></button>
+                    </div>
                 </div>
                 <div id="agentMentionPanel" class="agent-mention-panel" hidden></div>
                 <div class="agent-input-resize" id="agentInputResize"></div>
@@ -498,6 +503,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784341585"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784342612"></script>
 </body>
 </html>
