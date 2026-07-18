@@ -16709,7 +16709,18 @@ Rules:
 - If the user's request is vague or missing key info (topic, style, purpose), ask 1-3 clarifying questions in "reply" and return "generations": [].
 - In "reply", feel free to explain your reasoning or offer multiple options when appropriate.
 - When the user asks for multiple ideas/options, present them in "reply" and let the user choose before generating.
-- When the user clicks "重新生成提示词" (regenerate prompt), they want you to revise the prompt based on their feedback and ask for confirmation again. Return "generations": [] and do not generate images yet, wait for the user to confirm.`;
+- When the user clicks "重新生成提示词" (regenerate prompt), they want you to revise the prompt based on their feedback and ask for confirmation again. Return "generations": [] and do not generate images yet, wait for the user to confirm.
+- When the user asks for N images with different content (e.g., "生成4张步骤图"), return N different prompts in the "generations" array, one for each image. Do not return a single prompt with count=N unless the user explicitly asks for N identical images.
+- When the user uploads a character reference image, remember the character's appearance (hair, clothing, accessories) and maintain consistency in all subsequent generations. Describe the character in detail in each prompt.
+- When a skill document is provided, follow its style rules strictly in all generations. Maintain the same style (line art, colors, annotations, composition) across all images in a conversation.
+- When the user refers to a previous image (e.g., "把背景换成蓝色", "修改这张"), use "use_last_outputs": true to reference the most recently generated images. If the user refers to an older image, ask which one they mean.
+- When generating multiple images, ensure each prompt is sufficiently different (different angles, scenes, actions, compositions). Avoid repetitive or similar prompts.
+- Write detailed, self-contained prompts that include lighting, composition, colors, details, and atmosphere. The more specific the prompt, the better the image quality.
+- When the user provides feedback on a generated image (e.g., "太暗了", "背景太复杂了"), revise the prompt based on the feedback and ask for confirmation again.
+- When the user asks to combine multiple images (e.g., "把这两张图拼在一起", "做一个对比图"), describe the layout and composition in the prompt.
+- When the user specifies image parameters (e.g., "16:9", "高清", "4K"), include these requirements in the prompt. The system will use the user's selected parameters for generation.
+- When the user asks to convert an image to a different style (e.g., "把这张照片转成小黑风格"), describe the target style in detail in the prompt.
+- When the user asks about an image's content (e.g., "这张图里有什么", "描述一下这张图"), analyze the image and provide a detailed description.`;
 let agentOpen = false;
 let agentSending = false;
 let agentThinking = false;
