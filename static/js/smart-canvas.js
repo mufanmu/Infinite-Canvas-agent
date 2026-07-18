@@ -7258,6 +7258,7 @@ function smartNodeToolbarHtml(node){
     const imageCount = images.filter(img => mediaKindForItem(imageForDisplay(img)) === 'image' && imageForDisplay(img)?.url).length;
     const gridLabel = imageCount > 1 ? '宫格拼接' : '宫格切分';
     const actions = [
+        {key:'sendToAgent', icon:'bot', label:'发送至Agent', enabled:true},
         {key:'preview', icon:'eye', label:'预览', enabled:kind === 'image' || kind === 'video'},
         {key:'crop', icon:'crop', label:'裁剪', enabled:canEditImage},
         {key:'outpaint', icon:'expand', label:'扩图', enabled:canEditImage},
@@ -7296,6 +7297,22 @@ function runSmartNodeToolbarAction(nodeId, action){
     selectedId = nodeId;
     selectedIds = [];
     selectedImage = {nodeId, index};
+    if(action === 'sendToAgent'){
+        // 发送图片到 Agent 面板作为附件
+        if(!agentOpen) toggleAgentPanel(true);
+        if(agentState){
+            if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+            if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX && !agentState.attachments.some(a => a.url === item.url)){
+                agentState.attachments.push({url:item.url, name:item.name || node.title || 'image', nodeId:node.id, x:Number(node.x) || 0, y:Number(node.y) || 0});
+                renderAgentAttachments();
+                saveAgentState();
+                toast('已发送至 Agent');
+            } else {
+                toast('附件已存在或已达上限');
+            }
+        }
+        return;
+    }
     if(action === 'download'){
         downloadPreviewFile(node.images?.[index] || item);
         return;
@@ -16900,8 +16917,7 @@ function renderAgentAttachments(){
         html += `<div class="agent-attach-skill"><i data-lucide="file-text"></i><span class="agent-attach-skill-name">${escapeHtml(skill.name || 'skill.md')}</span><button type="button" data-agent-skill-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     attachments.forEach((att, i) => {
-        const name = String(att.name || 'image').length > 12 ? String(att.name || 'image').slice(0, 12) + '...' : String(att.name || 'image');
-        html += `<div class="agent-attach-ref" data-agent-att-jump="${i}" title="${escapeHtml(att.name || 'image')}"><img src="${escapeHtml(att.url)}" alt=""><span class="agent-attach-ref-name">${escapeHtml(name)}</span><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
+        html += `<div class="agent-attach-chip" data-agent-att-jump="${i}" title="${escapeHtml(att.name || 'image')}"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     agentAttachRow.innerHTML = html;
     if(window.lucide) lucide.createIcons();
@@ -16932,14 +16948,17 @@ function renderAgentAttachments(){
                 if(node){
                     selectedId = node.id;
                     selectedIds = [];
-                    centerViewportOnWorldPoint({x:Number(node.x) || 0, y:Number(node.y) || 0});
+                    // 考虑 Agent 面板宽度（360px），将跳转位置偏左，使图片在可视区域居中
+                    const agentOffset = agentOpen ? 180 : 0;
+                    centerViewportOnWorldPoint({x:(Number(node.x) || 0) - agentOffset, y:Number(node.y) || 0});
                     render();
                     return;
                 }
             }
             // 没有 nodeId 时用坐标跳转
             if(att.x || att.y){
-                centerViewportOnWorldPoint({x:Number(att.x) || 0, y:Number(att.y) || 0});
+                const agentOffset = agentOpen ? 180 : 0;
+                centerViewportOnWorldPoint({x:(Number(att.x) || 0) - agentOffset, y:Number(att.y) || 0});
             }
         };
     });
@@ -17442,6 +17461,8 @@ function initAgentPanel(){
         const rect = btn.getBoundingClientRect();
         panel.style.left = Math.max(8, rect.left) + 'px';
         panel.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+        panel.style.top = 'auto';
+        panel.style.right = 'auto';
         panel.hidden = false;
     }
     modelBtn?.addEventListener('click', e => {
@@ -17471,6 +17492,18 @@ function initAgentPanel(){
         if(wasHidden) renderAgentChatList();
         panel.hidden = !wasHidden;
     });
+    // 更多操作菜单（折叠新建/对话列表/删除）
+    const moreBtn = document.getElementById('agentMoreBtn');
+    const morePanel = document.getElementById('agentMorePanel');
+    moreBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(morePanel) morePanel.hidden = !morePanel.hidden;
+    });
+    document.addEventListener('pointerdown', e => {
+        if(morePanel && !morePanel.hidden && !e.target.closest('#agentMorePanel') && !e.target.closest('#agentMoreBtn')){
+            morePanel.hidden = true;
+        }
+    }, true);
     document.addEventListener('pointerdown', e => {
         const panel = document.getElementById('agentChatListPanel');
         if(panel && !panel.hidden && !e.target.closest('#agentChatListPanel') && !e.target.closest('#agentChatListBtn')){

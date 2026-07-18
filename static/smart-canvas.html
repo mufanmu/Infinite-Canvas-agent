@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/i18n.js?v=2026.07.15.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784345054">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784345763">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -197,10 +197,14 @@
         <aside id="agentPanel" class="agent-panel">
             <div class="asset-head">
                 <div class="asset-title"><i data-lucide="bot"></i><span data-i18n="smart.agentPanel">AI Agent</span></div>
-                <button id="agentNewChatBtn" class="asset-mini-btn agent-head-btn" type="button" title="新建对话"><i data-lucide="plus"></i><span>新建</span></button>
-                <button id="agentChatListBtn" class="asset-mini-btn agent-head-btn" type="button" title="对话列表"><i data-lucide="list"></i><span>对话</span></button>
-                <button id="agentDeleteChatBtn" class="asset-mini-btn agent-head-btn" type="button" title="删除当前对话"><i data-lucide="trash-2"></i><span>删除</span></button>
-                <button id="agentCloseBtn" class="asset-mini-btn agent-head-btn" type="button" title="关闭" data-i18n-title="common.close"><i data-lucide="x"></i><span>关闭</span></button>
+                <button id="agentNewChatBtn" class="asset-mini-btn" type="button" title="新建对话"><i data-lucide="plus"></i></button>
+                <button id="agentChatListBtn" class="asset-mini-btn" type="button" title="对话列表"><i data-lucide="list"></i></button>
+                <div class="agent-more-wrap">
+                    <button id="agentMoreBtn" class="asset-mini-btn" type="button" title="更多操作"><i data-lucide="more-horizontal"></i></button>
+                    <div id="agentMorePanel" class="agent-more-panel" hidden>
+                        <button id="agentDeleteChatBtn" class="agent-more-item" type="button"><i data-lucide="trash-2"></i><span>删除当前对话</span></button>
+                    </div>
+                </div>
             </div>
             <div class="agent-models" style="display:none">
                 <select id="agentChatProvider" class="agent-select"></select>
@@ -548,6 +552,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784345143"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784345802"></script>
 </body>
 </html>

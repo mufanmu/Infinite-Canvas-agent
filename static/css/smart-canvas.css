@@ -1223,7 +1223,8 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-onebox:focus-within { border-color:var(--strong); }
 .agent-attach-row { display:flex; flex-wrap:wrap; gap:6px; padding:8px 10px 0; }
 .agent-attach-row:empty { display:none; }
-.agent-attach-chip { position:relative; width:44px; height:44px; border-radius:10px; overflow:hidden; border:1px solid var(--line); }
+.agent-attach-chip { position:relative; width:44px; height:44px; border-radius:10px; overflow:hidden; border:1px solid var(--line); cursor:pointer; transition:border-color .14s ease; }
+.agent-attach-chip:hover { border-color:var(--strong); }
 .agent-attach-chip img { width:100%; height:100%; object-fit:cover; display:block; }
 .agent-attach-chip button { position:absolute; top:2px; right:2px; width:15px; height:15px; border-radius:50%; background:rgba(15,23,42,.78); color:#fff; display:flex; align-items:center; justify-content:center; border:none; cursor:pointer; padding:0; }
 .agent-attach-chip button i,.agent-attach-chip button svg { width:9px; height:9px; }
@@ -1256,9 +1257,13 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-res-btn:hover { border-color:var(--strong); color:var(--text); }
 .agent-res-btn.active { border-color:var(--strong); background:var(--soft); color:var(--text); }
 
-/* 顶部按钮文字描述 */
-.agent-head-btn { display:inline-flex; align-items:center; gap:3px; height:auto; padding:3px 6px; border-radius:7px; font-size:9px; font-weight:700; }
-.agent-head-btn span { line-height:1; }
+/* 折叠菜单 */
+.agent-more-wrap { position:relative; }
+.agent-more-panel { position:absolute; top:100%; right:0; margin-top:4px; min-width:140px; border-radius:10px; border:1px solid var(--line); background:var(--card); box-shadow:0 8px 32px rgba(15,23,42,.14); z-index:80; padding:4px; display:flex; flex-direction:column; gap:2px; }
+.agent-more-panel[hidden] { display:none; }
+.agent-more-item { display:flex; align-items:center; gap:6px; width:100%; padding:7px 10px; border-radius:7px; border:none; background:none; color:var(--text); font-size:10.5px; font-weight:650; cursor:pointer; text-align:left; transition:background .14s ease; }
+.agent-more-item:hover { background:var(--soft); }
+.agent-more-item i,.agent-more-item svg { width:13px; height:13px; color:var(--faint); }
 
 /* 参数面板（OneBox 风格） */
 .agent-params-panel { min-width:280px; padding:12px; gap:14px; }
