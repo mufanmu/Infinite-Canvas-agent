@@ -16768,16 +16768,18 @@ A. 风格/属性修改（use_last_outputs必须为true）：
    - prompt应简洁聚焦：只描述要修改的内容+保持原图其他部分不变
    - 例如用户说"换成像素风"，prompt应该是"将原图转换为像素艺术风格，保持原有的主体、姿态、构图和色彩不变，仅改变渲染风格为像素化"
 
-B. 主体更换（use_last_outputs必须为false）：
+B. 主体更换（use_last_outputs必须为true）：
    - 用户要把图片中的主体换成另一个完全不同的主体
-   - 例如："企鹅换成鲨鱼"、"把猫变成狗"、"换成一只老鹰"
-   - 此时不要引用上一轮图片，因为编辑API会保留原图主体导致更换失败
-   - prompt应完整描述新主体的全部细节，作为全新生成处理
-   - 例如用户说"企鹅换成鲨鱼"，prompt应该是"鲨鱼在清澈海水中游泳，流线型身体，锋利的牙齿，深蓝色海洋背景，光影穿透水面"，而不是"把企鹅改成鲨鱼"
+   - 例如："企鹅换成鲨鱼"、"龙换成马"、"把猫变成狗"
+   - 重要：必须引用上一轮图片（use_last_outputs: true），以保留原图的场景、背景、构图
+   - prompt必须明确指示"替换主体+保留场景"，格式："将原图中的[原主体]替换为[新主体]，保持原有的场景、背景、构图、光影、色彩和氛围完全不变，仅改变主体本身，新主体出现在原来主体的位置，保持相似的姿态和构图"
+   - 例如用户说"龙换成马"，prompt应该是"将原图中的龙替换为一匹马，保持原有的场景、背景、构图、光影、色彩和氛围完全不变，仅将主体从龙改为马，马出现在原来龙的位置，保持相似的姿态"
+   - 绝对不要写成全新生成的描述（如"马在草原上奔跑"），那样会丢失原图场景
 
 通用规则：
 1. 绝对不要添加用户没要求的内容，特别是：动画帧、序列帧、多角度视图、动作分解、分镜
-2. 判断依据：如果新主体和原主体是不同的物体/生物/人物 → 主体更换(B)；如果只是改变同一个主体的呈现方式 → 风格修改(A)`;
+2. 判断依据：如果新主体和原主体是不同的物体/生物/人物 → 主体更换(B)；如果只是改变同一个主体的呈现方式 → 风格修改(A)
+3. 无论A还是B，都使用use_last_outputs: true引用原图，区别在于prompt的写法不同`;
 let agentOpen = false;
 let agentSending = false;
 let agentThinking = false;
@@ -17627,11 +17629,9 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
                 const hasUserGenIntent = noOptions && userGenIntentRe.test(userText);
                 const hasMeaninglessConfirm = noOptions && meaninglessConfirmRe.test(replyText);
                 const hasAnyIntent = hasGenInProgress || hasUserGenIntent || isModifyScenario || hasMeaninglessConfirm;
-                // 主体更换检测：区分"换成像素风"(风格修改→edit)和"企鹅换成鲨鱼"(主体更换→new gen)
-                const styleWordsRe = /像素|卡通|动漫|写实|油画|水彩|水墨|素描|3d|2d|赛博|蒸汽波|极简|扁平|矢量|霓虹|复古|怀旧|黑白|彩色|暖色|冷色|色调|风格|画风|效果|版本|背景|光影|渲染|手绘|厚涂|薄涂|赛璐璐|哥特|巴洛克|印象派|超现实|波普|抽象|极繁|lowpoly| voxel|点彩|工笔|白描|版画|木刻|剪纸|泥塑|陶艺|蜡笔|马克笔|钢笔|铅笔|粉彩|色粉|丙烯|坦培拉|壁画|浮世绘|年画|春画|浮世|绘本|童画|童话|绘本风|童画风|q版|q版|萌系|治愈系|暗黑系|恐怖谷|超现实|魔幻|科幻|废土|末日|末世|赛博|蒸汽|柴油|原子|太空|星际|深海|丛林|沙漠|雪原|火山|冰川|天空|云端|海底|地底|星空|极光|彩虹|闪电|暴风|龙卷|海啸|地震|火山喷发|陨石|黑洞|星云|银河|宇宙/i;
-                const isStyleModify = isModifyScenario && styleWordsRe.test(userText);
-                // use_last_outputs 仅在风格修改时为 true；主体更换时为 false（全新生成）
-                const fallbackUseLastOutputs = isStyleModify;
+                // 修改场景（风格修改+主体更换）都使用 use_last_outputs: true 引用原图
+                // 区别在于 prompt 写法：风格修改→描述风格变化；主体更换→明确指示替换主体+保留场景
+                const fallbackUseLastOutputs = isModifyScenario;
                 if(hasAnyIntent){
                         const finalPrompt = genPrompt || userText;
                         parsed.generations = [{
