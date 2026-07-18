@@ -16986,7 +16986,7 @@ function agentGenCardHtml(gen){
     const status = gen.status || 'running';
     const statusText = status === 'done' ? tr('smart.agentGenDone') : status === 'error' ? tr('smart.agentGenFail') : tr('smart.agentGenerating');
     const refTags = [gen.use_last_outputs ? tr('smart.agentRefLast') : '', gen.use_attachments ? tr('smart.agentRefAttach') : ''].filter(Boolean).join(' · ');
-    const thumbs = (gen.results || []).filter(r => r?.url).map(r => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy">`).join('');
+    const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer">`).join('');
     return `<div class="agent-gen-card"><div class="agent-gen-prompt">${escapeHtml(gen.prompt || '')}</div><div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${refTags ? ' · ' + escapeHtml(refTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
 }
 function agentMessageHtml(msg){
@@ -17030,6 +17030,26 @@ function renderAgentMessages(){
     if(newChatBtn) newChatBtn.disabled = agentSending;
     if(chatListBtn) chatListBtn.disabled = agentSending;
     if(moreBtn) moreBtn.disabled = agentSending;
+    // 绑定生成图片点击跳转事件
+    agentMessages.querySelectorAll('[data-agent-gen-jump]').forEach(img => {
+        img.onclick = e => {
+            e.stopPropagation();
+            const nodeId = img.dataset.agentGenJump;
+            const x = Number(img.dataset.agentGenX) || 0;
+            const y = Number(img.dataset.agentGenY) || 0;
+            if(nodeId){
+                const node = (nodes || []).find(n => n.id === nodeId);
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    agentCenterOnNode(node);
+                    render();
+                    return;
+                }
+            }
+            if(x || y) agentCenterOnPoint(x, y);
+        };
+    });
 }
 function agentLastResults(){
     const msgs = agentState?.messages || [];
@@ -17356,7 +17376,11 @@ async function runAgentGenerations(assistantMsg, userMsg){
                 undoSuppressed = true;
                 const node = createImageNodeAt(agentFindEmptyPosition(urls.length), urls.map(u => ({...u})));
                 undoSuppressed = false;
-                if(node) selectedId = node.id;
+                if(node){
+                    selectedId = node.id;
+                    // 保存节点 ID 到 results，用于点击跳转
+                    gen.results = gen.results.map((r, i) => ({...r, nodeId: node.id, nodeX: Number(node.x) || 0, nodeY: Number(node.y) || 0}));
+                }
             }
         } catch(e) {
             gen.status = 'error';
