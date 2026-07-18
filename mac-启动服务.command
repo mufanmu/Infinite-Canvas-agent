@@ -21,6 +21,24 @@ chmod +x main.py 2>/dev/null
 echo "权限已修复！"
 echo ""
 
+# 检查并安装 socksio（系统代理使用 SOCKS5 时 httpx 需要此包）
+PYTHON_BIN=""
+if [ -x /opt/homebrew/bin/python3 ]; then
+    PYTHON_BIN="/opt/homebrew/bin/python3"
+elif [ -x /usr/local/bin/python3 ]; then
+    PYTHON_BIN="/usr/local/bin/python3"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+fi
+if [ -n "$PYTHON_BIN" ]; then
+    if ! $PYTHON_BIN -c "import socksio" 2>/dev/null; then
+        echo "检测到缺少 socksio 依赖（SOCKS 代理需要），正在安装..."
+        $PYTHON_BIN -m pip install socksio -q 2>/dev/null
+        echo "socksio 安装完成！"
+        echo ""
+    fi
+fi
+
 # 清理占用 3000 端口的旧进程，避免 address already in use
 OLD_PID=$(lsof -ti :3000 2>/dev/null)
 if [ -n "$OLD_PID" ]; then

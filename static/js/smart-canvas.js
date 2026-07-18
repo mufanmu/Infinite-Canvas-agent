@@ -16695,32 +16695,85 @@ const AGENT_NL = String.fromCharCode(10);
 const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent inside an infinite-canvas app. If a skill document is provided above, follow its style and rules closely.
 
 You MUST reply with a raw JSON object only. No markdown fences, no explanation, no extra text:
-{"reply":"your conversational reply","options":[{"label":"确认","value":"确认"},{"label":"修改","value":"修改"}],"prompts":["detailed image prompt in English"],"generations":[{"prompt":"detailed image prompt in English","count":1,"use_last_outputs":false,"use_attachments":false}]}
+{"reply":"your conversational reply","options":[],"prompts":[],"generations":[{"prompt":"详细的中文生图提示词","count":1,"use_last_outputs":false,"use_attachments":false}]}
 
-Rules:
+## Field Reference
 - "reply": text shown to the user, written in the user's language.
-- "options": optional array of action buttons shown below your reply. Use when you ask the user to confirm, choose, or decide. Each option has "label" (button text) and "value" (text sent when clicked). Omit or use [] when no options are needed.
-- "prompts": optional array of prompt strings when you propose a plan but wait for user confirmation. Use this when you ask the user to confirm before generating. Each prompt is a detailed, self-contained image prompt in English.
-- "generations": images to generate right away. Use [] when no image is needed (questions, chat, prompt discussion) or when waiting for user confirmation (use "prompts" instead).
-- "prompt": detailed, self-contained image prompt written in English unless the skill says otherwise.
+- "options": array of action buttons shown below your reply. Each option has "label" (button text) and "value" (text sent when clicked). Omit or use [] when no buttons are needed.
+- "prompts": prompt strings used when you propose a plan but wait for user confirmation. Each prompt should be a detailed, self-contained image prompt written in Chinese.
+- "generations": images to generate right away. Use [] when no image is needed.
+- "prompt": detailed, self-contained image prompt written in Chinese (中文). Include subject, style, composition, lighting, colors, details, and atmosphere.
 - "count": integer 1 to 8.
-- "use_last_outputs": true when the request refers to or modifies the most recently generated images (they are shown to you and will be used as reference images).
+- "use_last_outputs": true when the request refers to or modifies the most recently generated images.
 - "use_attachments": true when the request refers to or modifies images the user attached.
 - At most 8 generation items.
-- If the user's request is vague or missing key info (topic, style, purpose), ask 1-3 clarifying questions in "reply" and return "generations": [].
-- In "reply", feel free to explain your reasoning or offer multiple options when appropriate.
-- When the user asks for multiple ideas/options, present them in "reply" and let the user choose before generating.
-- When the user clicks "重新生成提示词" (regenerate prompt), they want you to revise the prompt based on their feedback and ask for confirmation again. Return "generations": [] and do not generate images yet, wait for the user to confirm.
-- When the user asks for N images with different content (e.g., "生成4张步骤图"), return N different prompts in the "generations" array, one for each image. Do not return a single prompt with count=N unless the user explicitly asks for N identical images.
-- When the user uploads a character reference image, remember the character's appearance (hair, clothing, accessories) and maintain consistency in all subsequent generations. Describe the character in detail in each prompt.
-- When a skill document is provided, follow its style rules strictly in all generations. Maintain the same style (line art, colors, annotations, composition) across all images in a conversation.
-- When the user refers to a previous image (e.g., "把背景换成蓝色", "修改这张"), use "use_last_outputs": true to reference the most recently generated images. If the user refers to an older image, ask which one they mean.
-- When generating multiple images, ensure each prompt is sufficiently different (different angles, scenes, actions, compositions). Avoid repetitive or similar prompts.
-- Write detailed, self-contained prompts that include lighting, composition, colors, details, and atmosphere. The more specific the prompt, the better the image quality.
-- When the user provides feedback on a generated image (e.g., "太暗了", "背景太复杂了"), revise the prompt based on the feedback and ask for confirmation again.
-- When the user asks to combine multiple images (e.g., "把这两张图拼在一起", "做一个对比图"), describe the layout and composition in the prompt.
-- When the user specifies image parameters (e.g., "16:9", "高清", "4K"), include these requirements in the prompt. The system will use the user's selected parameters for generation.
+
+## Core Principle: Generate, don't ask
+The goal is to help users get images, not to have conversations. Follow these rules strictly:
+1. If the user's request has a clear subject (what to draw) AND enough detail (style, scene, or features) → EXPAND the prompt and GENERATE immediately (Pattern 1). Do NOT ask for confirmation.
+2. If the user just selected an option or answered a clarification question → their request is now clear → GENERATE immediately (Pattern 1). Do NOT ask "确认要生成吗？" — that is meaningless and wastes a turn.
+3. Only ask questions when you genuinely cannot form a reasonable plan (Pattern 3 or 4).
+4. NEVER reply with only "你确认要生成...吗？" without providing a full detailed prompt. If you want to confirm, you MUST include the complete prompt in "prompts" so the user can review it (Pattern 2).
+
+## Response Patterns — choose the right one each time
+
+### Pattern 1: DIRECT GENERATION (default — use this whenever possible)
+The user gave enough detail, OR just answered a clarification question, OR just selected an option. Expand their request into a detailed Chinese prompt and generate right away.
+- "generations": [{"prompt":"你的详细中文提示词","count":1}]
+- "options": []
+- "prompts": []
+- "reply": brief description of what you're generating (e.g., "好的，正在为您生成一条守护青铜鼎的红色龙...")
+Triggers: "画一只橘猫坐在窗台上" / user selected "红色龙守护青铜鼎" / user answered "卡通风格"
+
+### Pattern 2: CONFIRM WITH FULL PROMPT (use sparingly — only when the plan is complex and user might want to adjust)
+You have a specific plan but it involves many creative choices the user might want to tweak. You MUST provide the FULL detailed Chinese prompt in "prompts" for the user to review — NOT just ask "确认吗？".
+- "prompts": ["完整的中文提示词，包含主体、风格、构图、光线、色彩、细节、氛围"]
+- "options": [{"label":"确认","value":"确认"},{"label":"修改","value":"修改"}]
+- "generations": []
+- "reply": the full prompt text, so the user can read it
+IMPORTANT: If you can't provide a meaningfully different or expanded prompt beyond what the user already said, use Pattern 1 instead.
+
+### Pattern 3: MULTIPLE CHOICE (request is vague, several distinct directions possible)
+The user's request is too vague to form a single plan. Put each choice as a SEPARATE button. After the user selects one → go to Pattern 1 (generate directly).
+- "options": [
+    {"label":"盘旋云端的金色龙","value":"我要生成一条盘旋于云端的金色龙"},
+    {"label":"飞越山川的蓝色龙","value":"我要生成一条飞越山川的蓝色龙"},
+    {"label":"守护宫殿的红色龙","value":"我要生成一条守护宫殿的红色龙"}
+  ]
+- "reply": a short question like "您希望生成哪种龙？"
+- "generations": []
+- "prompts": []
+IMPORTANT: After the user clicks an option, do NOT ask for confirmation again — generate directly using Pattern 1.
+
+### Pattern 4: CLARIFY (critical info is missing, cannot form options)
+The request is missing critical info and you cannot guess 2-3 reasonable options. Ask 1-3 short questions.
+- "reply": your questions
+- "options": []
+- "generations": []
+- "prompts": []
+Example: "画一个角色" → ask: male or female? what style? what scene?
+
+### Pattern 5: BATCH GENERATION (user asks for multiple different images)
+- "generations": [{prompt: "中文提示词1", count:1}, {prompt: "中文提示词2", count:1}, ...]
+- "options": []
+
+## How to choose
+- User request has subject + any detail → Pattern 1 (expand and generate)
+- User just selected an option or answered a question → Pattern 1 (generate now)
+- User request is vague, multiple distinct directions → Pattern 3 (offer choices)
+- User request is missing critical info, can't form options → Pattern 4 (ask)
+- User asks for N different images → Pattern 5
+- AVOID Pattern 2 unless the plan is truly complex and the prompt adds significant value beyond what the user said
+
+## Important rules
+- All prompts MUST be written in Chinese (中文). Include 主体、风格、构图、光线、色彩、细节、氛围.
+- When the user uploads a character reference image, remember the character's appearance and maintain consistency in all subsequent generations.
+- When a skill document is provided, follow its style rules strictly.
+- When the user refers to a previous image (e.g., "把背景换成蓝色", "修改这张"), use "use_last_outputs": true.
+- When generating multiple images, ensure each prompt is sufficiently different.
+- When the user specifies image parameters (e.g., "16:9", "高清", "4K"), include these in the prompt.
 - When the user asks to convert an image to a different style (e.g., "把这张照片转成小黑风格"), describe the target style in detail in the prompt.
+- NEVER ask "确认要生成吗？" without providing a full prompt. This is the most important rule.
 - When the user asks about an image's content (e.g., "这张图里有什么", "描述一下这张图"), analyze the image and provide a detailed description.`;
 let agentOpen = false;
 let agentSending = false;
@@ -16769,6 +16822,26 @@ function loadAgentState(){
     // 加载当前对话的 messages
     const activeConv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
     agentState.messages = activeConv ? (activeConv.messages || []).slice(-AGENT_MSG_MAX) : [];
+    // 检测上次中断的操作，添加提示消息
+    if(agentState._pendingMessage !== undefined){
+        const pendingText = String(agentState._pendingMessage || '');
+        if(pendingText && agentState.messages.length){
+            // 检查最后一条是否是用户消息（说明 assistant 还没回复就被中断了）
+            const lastMsg = agentState.messages[agentState.messages.length - 1];
+            if(lastMsg && lastMsg.role === 'user'){
+                agentState.messages.push({
+                    id: uid('am'),
+                    role: 'assistant',
+                    text: '⚠️ ' + (tr('smart.agentInterrupted') || '上次操作被中断，请重新发送'),
+                    options: [{label: tr('smart.agentRetry') || '重新发送', value: pendingText}],
+                    generations: [],
+                    ts: Date.now()
+                });
+            }
+        }
+        delete agentState._pendingMessage;
+        delete agentState._pendingAttachments;
+    }
 }
 function saveAgentState(){
     clearTimeout(agentSaveTimer);
@@ -17001,7 +17074,9 @@ function agentGenCardHtml(gen){
     const statusText = status === 'done' ? tr('smart.agentGenDone') : status === 'error' ? tr('smart.agentGenFail') : tr('smart.agentGenerating');
     const refTags = [gen.use_last_outputs ? tr('smart.agentRefLast') : '', gen.use_attachments ? tr('smart.agentRefAttach') : ''].filter(Boolean).join(' · ');
     const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer">`).join('');
-    return `<div class="agent-gen-card"><div class="agent-gen-prompt">${escapeHtml(gen.prompt || '')}</div><div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${refTags ? ' · ' + escapeHtml(refTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
+    const promptText = escapeHtml(gen.prompt || '');
+    const promptHtml = promptText ? `<div class="agent-gen-prompt agent-gen-prompt-collapsed" data-agent-gen-prompt="1">${promptText}<button class="agent-gen-prompt-toggle" type="button" data-agent-prompt-toggle="1">${escapeHtml(tr('smart.agentExpand') || '展开')}</button></div>` : '';
+    return `<div class="agent-gen-card">${promptHtml}<div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${refTags ? ' · ' + escapeHtml(refTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
 }
 function agentMessageHtml(msg){
     const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
@@ -17116,6 +17191,32 @@ function renderAgentMessages(){
             }
             // 最后通过坐标跳转
             if(x || y) agentCenterOnPoint(x, y);
+        };
+    });
+    // 绑定提示词展开/收起事件
+    agentMessages.querySelectorAll('[data-agent-prompt-toggle]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const promptDiv = btn.closest('[data-agent-gen-prompt]');
+            if(!promptDiv) return;
+            const isCollapsed = promptDiv.classList.contains('agent-gen-prompt-collapsed');
+            if(isCollapsed){
+                promptDiv.classList.remove('agent-gen-prompt-collapsed');
+                promptDiv.classList.add('agent-gen-prompt-expanded');
+                btn.textContent = tr('smart.agentCollapse') || '收起';
+            } else {
+                promptDiv.classList.remove('agent-gen-prompt-expanded');
+                promptDiv.classList.add('agent-gen-prompt-collapsed');
+                btn.textContent = tr('smart.agentExpand') || '展开';
+            }
+        };
+    });
+    // 点击提示词区域也可展开/收起
+    agentMessages.querySelectorAll('[data-agent-gen-prompt]').forEach(div => {
+        div.onclick = e => {
+            if(e.target.closest('[data-agent-prompt-toggle]')) return;
+            const btn = div.querySelector('[data-agent-prompt-toggle]');
+            if(btn) btn.click();
         };
     });
 }
@@ -17267,7 +17368,73 @@ function agentHistoryMessages(){
         return {role:'assistant', content:content || '(no text)'};
     });
 }
-function parseAgentResponse(raw){
+function extractNumberedOptions(text){
+    const lines = String(text||'').split('\n').map(l=>l.trim());
+    const numRe = /^(\d+)[.、)]\s*(.+)$/;
+    const items = [];
+    const headerLines = [];
+    let inList = false;
+    for(let i=0;i<lines.length;i++){
+        const line = lines[i];
+        if(!line) continue;
+        const m = line.match(numRe);
+        if(m){
+            inList = true;
+            const title = m[2].trim();
+            let desc = '';
+            if(i+1 < lines.length && lines[i+1] && !lines[i+1].match(numRe)){
+                desc = lines[i+1].trim();
+                i++;
+            }
+            items.push({label:title, value:desc||title});
+        } else if(!inList){
+            headerLines.push(line);
+        }
+    }
+    if(items.length >= 2){
+        return {reply:headerLines.join('\n').trim(), options:items.slice(0,4)};
+    }
+    return null;
+}
+function extractClarifyOptions(text, lastUserText){
+    const bracketRe = /([^\s,，、（）()：:?？！!]{2,6})[（(]([^）)]{2,60})[）)]/g;
+    const items = [];
+    let match;
+    while((match = bracketRe.exec(text)) !== null){
+        let category = match[1].replace(/^[或以及和的]+/, '').trim();
+        if(!category || category.length > 6) continue;
+        const optsText = match[2];
+        const opts = optsText.split(/[、,，/]/).map(s => s.trim()).filter(s => s && s !== '等' && s.length <= 10);
+        opts.forEach(opt => {
+            const cleanOpt = opt.replace(/等$/, '').trim();
+            if(cleanOpt){
+                const ctx = lastUserText ? lastUserText + '，' + category + '：' + cleanOpt : category + '：' + cleanOpt;
+                items.push({label:cleanOpt, value:ctx});
+            }
+        });
+    }
+    return items.length >= 2 ? items.slice(0, 8) : null;
+}
+function extractGenPrompt(text){
+    // 从 LLM 回复中提取中文生图提示词（长描述性段落）
+    // 优先匹配以中文或英文开头的长描述行（>=20字符）
+    const lines = String(text||'').split('\n').map(l=>l.trim()).filter(l=>l);
+    for(const line of lines){
+        if(line.length < 20) continue;
+        // 跳过问句和短对话
+        if(/[？?]$/.test(line) && line.length < 40) continue;
+        // 匹配以中文描述或英文大写开头的长行（通常是 prompt）
+        const cnChars = (line.match(/[\u4e00-\u9fff]/g) || []).length;
+        const enLetters = (line.match(/[a-zA-Z]/g) || []).length;
+        const totalLetters = cnChars + enLetters;
+        if(totalLetters / line.length < 0.5) continue;
+        // 跳过纯对话（如"好的，正在为您生成..."）
+        if(/^(好的|没问题|当然|好的[,，])/i.test(line) && line.length < 50) continue;
+        return line;
+    }
+    return null;
+}
+function parseAgentResponse(raw, lastUserText){
     const text = String(raw || '').trim();
     const candidates = [text];
     if(text.includes('```')){
@@ -17287,10 +17454,14 @@ function parseAgentResponse(raw){
             const data = JSON.parse(candidate);
             if(!data || typeof data !== 'object') continue;
             const reply = typeof data.reply === 'string' ? data.reply : (typeof data.text === 'string' ? data.text : '');
-            const options = (Array.isArray(data.options) ? data.options : [])
+            let options = (Array.isArray(data.options) ? data.options : [])
                 .filter(o => o && typeof o.label === 'string' && typeof o.value === 'string')
                 .slice(0, 4)
                 .map(o => ({label:o.label.trim(), value:o.value.trim()}));
+            if(options.length === 0 && reply){
+                const numbered = extractNumberedOptions(reply);
+                if(numbered) options = numbered.options;
+            }
             const prompts = (Array.isArray(data.prompts) ? data.prompts : [])
                 .filter(p => typeof p === 'string' && p.trim())
                 .slice(0, AGENT_GEN_MAX_PER_MSG)
@@ -17301,6 +17472,15 @@ function parseAgentResponse(raw){
                 .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
             return {reply, options, prompts, generations};
         } catch(e) { /* 尝试下一个候选 */ }
+    }
+    // JSON 解析失败时的 fallback 链
+    const numberedFallback = extractNumberedOptions(text);
+    if(numberedFallback){
+        return {reply:numberedFallback.reply || text, options:numberedFallback.options, prompts:[], generations:[]};
+    }
+    const clarifyOptions = extractClarifyOptions(text, lastUserText);
+    if(clarifyOptions){
+        return {reply:text, options:clarifyOptions, prompts:[], generations:[]};
     }
     return {reply:text, generations:[]};
 }
@@ -17322,6 +17502,9 @@ async function sendAgentMessage(){
     renderAgentAttachments();
     agentSending = true;
     agentThinking = true;
+    // 保存待处理消息，刷新后可恢复
+    agentState._pendingMessage = text;
+    agentState._pendingAttachments = attachments.slice();
     renderAgentMessages();
     saveAgentState();
     const contextImages = attachments.slice();
@@ -17348,7 +17531,54 @@ async function sendAgentMessage(){
             if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.promptLlmFailed')));
             return r.json();
         });
-        const parsed = parseAgentResponse(result.text || '');
+        const parsed = parseAgentResponse(result.text || '', text);
+        // 生图意图兜底：当 LLM 不遵循 JSON 格式、没返回 generations 时，
+        // 根据生图/修改/确认意图自动构造生图任务
+        // 同时：即使 LLM 返回了 generations，如果检测到修改意图但 use_last_outputs 未设置，也强制覆盖
+        {
+            const lastUser = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+            if(lastUser && lastUser.text && parsed.reply){
+                const userText = String(lastUser.text || '').trim();
+                const replyText = String(parsed.reply || '');
+                const genPrompt = extractGenPrompt(replyText);
+                // 修改/转换意图检测
+                const userModifyRe = /改成|转换成|换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
+                const replyModifyRe = /为您(?:将|把).{0,30}?(?:转换|改成|换成|修改|变成|调整|转为|调成|重新画|重画)|(?:将|把).{0,20}?(?:转换|改成|换成|修改|变成).{0,10}?(?:风格|效果|版本|色调)/i;
+                const hasUserModifyIntent = userModifyRe.test(userText);
+                const hasReplyModify = replyModifyRe.test(replyText);
+                const isModifyScenario = hasUserModifyIntent || hasReplyModify;
+                
+                if(parsed.generations.length === 0){
+                    // 场景A：LLM 没返回 generations，需要兜底构造
+                    const genInProgressRe = /正在生成|正在为你生成|正在为您生成|生成中|开始生成|马上生成|这就为你生成|这就为您生成|好的[,，]?\s*我来生成|好的[,，]?\s*马上|我将为你生成|我将为您生成|我来为你生成|我来为您生成|正在为你创建|正在为您创建|正在画|正在创建/i;
+                    const userGenIntentRe = /我要生成|帮我生成|帮我画|画一|生成一|创建一|制作一|来一张|来幅|来张|给我画|给我生成|帮我创建|帮我做/i;
+                    const meaninglessConfirmRe = /确认要生成|确认生成|确认要画|要为您生成.*吗|要生成.*吗|确认.*吗.*[？?]/i;
+                    const noOptions = !parsed.options || parsed.options.length === 0;
+                    const hasGenInProgress = genInProgressRe.test(replyText);
+                    const hasUserGenIntent = noOptions && userGenIntentRe.test(userText);
+                    const hasMeaninglessConfirm = noOptions && meaninglessConfirmRe.test(replyText);
+                    const hasAnyIntent = hasGenInProgress || hasUserGenIntent || isModifyScenario || hasMeaninglessConfirm;
+                    if(hasAnyIntent){
+                        const finalPrompt = genPrompt || userText;
+                        parsed.generations = [{
+                            prompt: finalPrompt,
+                            count: 1,
+                            use_last_outputs: isModifyScenario,
+                            use_attachments: !!(lastUser.images && lastUser.images.length),
+                            results: [],
+                            status: 'running'
+                        }];
+                        if(hasGenInProgress && !isModifyScenario && !hasMeaninglessConfirm){
+                            parsed.reply = tr('smart.agentGenerating') || '正在为您生成图片...';
+                        }
+                    }
+                } else if(isModifyScenario){
+                    // 场景B：LLM 返回了 generations，但修改场景下强制设置 use_last_outputs: true
+                    // 确保 GPT Image 2 走 /images/edits 而不是 /images/generations
+                    parsed.generations.forEach(g => { g.use_last_outputs = true; });
+                }
+            }
+        }
         // 如果用户点击了"重新生成提示词"，强制将 generations 设为空数组（只返回提示词，不生图）
         const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
         if(lastUserMsg && String(lastUserMsg.text || '').includes('重新生成提示词')){
@@ -17375,6 +17605,12 @@ async function sendAgentMessage(){
     } finally {
         agentSending = false;
         agentThinking = false;
+        // 清除待处理消息标记
+        if(agentState._pendingMessage !== undefined){
+            delete agentState._pendingMessage;
+            delete agentState._pendingAttachments;
+            saveAgentState();
+        }
         renderAgentMessages();
     }
 }
@@ -17435,10 +17671,21 @@ async function runAgentGenerations(assistantMsg, userMsg){
         gen.status = 'running';
         renderAgentMessages();
         // 先创建占位节点（按照图片尺寸来）
-        const placeholderNode = createImageNodeAt(agentFindEmptyPosition(gen.count), []);
+        const pos = agentFindEmptyPosition(gen.count);
+        const placeholderNode = createImageNodeAt(pos, []);
         if(placeholderNode){
             placeholderNode.pending = gen.count;
             placeholderNode.title = gen.prompt?.slice(0, 30) || '生成中...';
+            // 修复：设置计时开始时间，使占位节点显示正计时
+            placeholderNode.runStartedAt = nowMs();
+            placeholderNode.runTimerHidden = false;
+            // 修复：顶部对齐 — 找到已有图片节点的最小顶部 y，将占位节点顶部对齐
+            const existingNodes = (nodes || []).filter(n => isSmartImageNode(n) && n.id !== placeholderNode.id && (n.images || []).some(img => img?.url));
+            if(existingNodes.length){
+                let topY = Infinity;
+                existingNodes.forEach(n => { const r = nodeRect(n); if(r.y < topY) topY = r.y; });
+                placeholderNode.y = topY;
+            }
             render();
         }
         try {
@@ -17464,6 +17711,8 @@ async function runAgentGenerations(assistantMsg, userMsg){
                 placeholderNode.images = urls.map(u => ({...u}));
                 placeholderNode.pending = 0;
                 placeholderNode.title = urls.length > 1 ? 'Group' : 'Image';
+                // 修复：设置计时结束时间
+                placeholderNode.runFinishedAt = nowMs();
                 selectedId = placeholderNode.id;
                 undoSuppressed = false;
                 // 保存节点 ID 到 results，用于点击跳转

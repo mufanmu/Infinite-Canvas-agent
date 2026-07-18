@@ -4948,6 +4948,16 @@ async def generate_codex_provider_image(prompt, size, model, reference_images=No
             except Exception:
                 pass
 
+def system_prompt_requires_json(system_prompt):
+    """检测系统提示词是否要求 JSON 格式输出（如画布 Agent 的结构化回复）。
+
+    当系统提示词包含 JSON 格式要求时（如 AGENT_FORMAT_INSTRUCTION），
+    不应再追加"输出纯文本"指令，否则会导致 LLM 返回自然语言而非 JSON，
+    前端 parseAgentResponse 无法解析，进而无法显示"确认/修改"按钮和触发生图。
+    """
+    text = str(system_prompt or "").strip().lower()
+    return "json" in text or '"reply"' in text or '"generations"' in text or '"options"' in text
+
 def codex_chat_prompt(payload, history_messages=None):
     parts = []
     system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
@@ -4961,7 +4971,11 @@ def codex_chat_prompt(payload, history_messages=None):
             parts.append(f"{label}：\n{content}")
     message = str(getattr(payload, "message", "") or "").strip()
     parts.append(f"用户：\n{message}")
-    parts.append("请直接回答用户，输出纯文本，不要修改项目文件。")
+    # 如果系统要求 JSON 格式输出（如画布 Agent），保持格式要求；否则要求纯文本
+    if system_prompt_requires_json(system_prompt):
+        parts.append("请严格按照系统要求中的格式输出，不要添加 markdown 代码块标记或额外说明，不要修改项目文件。")
+    else:
+        parts.append("请直接回答用户，输出纯文本，不要修改项目文件。")
     return "\n\n".join(part for part in parts if part).strip()
 
 async def codex_chat_text(payload, history_messages=None):
@@ -5224,6 +5238,10 @@ async def generate_gemini_cli_provider_image(prompt, size, model, reference_imag
                 if url and url not in urls:
                     urls.append(url)
         if not urls:
+            # agy CLI 无法直接生图时，回退到 gpt-image-2-skill（与 Codex CLI 相同的生图路径）
+            skill_result = await generate_codex_provider_image_via_gpt_image_2_skill(prompt, size, model, ref_paths)
+            if skill_result:
+                return skill_result
             status_text = (raw.get("text") or raw.get("_stdout") or raw.get("_stderr") or "")[:1200]
             raise HTTPException(status_code=502, detail=f"{gemini_cli_display_name()} 已返回，但没有在输出目录发现图片：{status_text}")
         return {"type": "url", "value": urls[0]}, {"images": urls, "text": raw.get("text"), "provider": "gemini-cli", "raw": raw.get("raw")}
@@ -5263,7 +5281,12 @@ async def gemini_cli_chat_text(payload, history_messages=None):
         image_paths, temp_paths = await gemini_cli_reference_paths(image_values)
         if image_paths:
             prompt = f"{prompt}\n\n可参考的本地图片路径：\n" + "\n".join(image_paths)
-        prompt = f"{prompt}\n\n请直接回答用户，输出纯文本，不要修改项目文件。"
+        # 如果系统要求 JSON 格式输出（如画布 Agent），保持格式要求；否则要求纯文本
+        system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
+        if system_prompt_requires_json(system_prompt):
+            prompt = f"{prompt}\n\n请严格按照系统要求中的格式输出，不要添加 markdown 代码块标记或额外说明，不要修改项目文件。"
+        else:
+            prompt = f"{prompt}\n\n请直接回答用户，输出纯文本，不要修改项目文件。"
         raw = await run_gemini_cli(
             prompt,
             model=getattr(payload, "model", "") or GEMINI_CLI_DEFAULT_CHAT_MODELS[0],
@@ -5271,6 +5294,11 @@ async def gemini_cli_chat_text(payload, history_messages=None):
             allow_tools=False,
         )
         text = str(raw.get("text") or "").strip()
+        # 如果系统要求 JSON，优先使用 stdout 原始文本（避免 gemini_cli_text_from_raw 拆解 JSON 结构）
+        if system_prompt_requires_json(system_prompt):
+            stdout_text = str(raw.get("_stdout") or "").strip()
+            if stdout_text and '{' in stdout_text:
+                text = stdout_text
         return text or f"{gemini_cli_display_name()} 返回了空回复。", raw
     finally:
         for path in temp_paths:

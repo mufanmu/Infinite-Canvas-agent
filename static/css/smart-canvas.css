@@ -1196,9 +1196,10 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-chat-empty { padding:16px; text-align:center; font-size:10.5px; color:var(--faint); }
 
 /* 消息选项按钮 */
-.agent-msg-options { display:flex; gap:6px; margin-top:6px; }
-.agent-msg-option-btn { height:28px; padding:0 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:10.5px; font-weight:700; cursor:pointer; transition:border-color .14s ease, background .14s ease; }
+.agent-msg-options { display:flex; flex-direction:column; gap:6px; margin-top:6px; align-items:stretch; }
+.agent-msg-option-btn { min-height:28px; height:auto; padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:10.5px; font-weight:700; cursor:pointer; text-align:left; white-space:normal; word-break:break-word; line-height:1.4; transition:border-color .14s ease, background .14s ease; }
 .agent-msg-option-btn:hover { border-color:var(--strong); background:var(--soft); }
+.agent-msg-free-hint { margin-top:4px; font-size:9.5px; opacity:.45; }
 
 /* 消息操作按钮 */
 .agent-msg-actions { display:flex; gap:2px; opacity:0; transition:opacity .14s ease; }
@@ -1218,7 +1219,11 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-msg-thumbs { display:grid; grid-template-columns:repeat(3, 1fr); gap:5px; max-width:240px; }
 .agent-msg-thumbs img { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:9px; border:1px solid var(--line); cursor:pointer; display:block; }
 .agent-gen-card { width:250px; max-width:100%; border-radius:12px; border:1px solid var(--line); background:var(--card); padding:8px 10px; display:flex; flex-direction:column; gap:6px; }
-.agent-gen-prompt { font-size:10px; color:var(--muted); line-height:1.45; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.agent-gen-prompt { font-size:10px; color:var(--muted); line-height:1.45; position:relative; }
+.agent-gen-prompt-collapsed { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.agent-gen-prompt-expanded { /* 展开后不截断 */ }
+.agent-gen-prompt-toggle { display:inline-block; margin-left:4px; padding:0 2px; border:none; background:none; color:var(--strong); font-size:10px; font-weight:700; cursor:pointer; vertical-align:baseline; white-space:nowrap; }
+.agent-gen-prompt-toggle:hover { text-decoration:underline; }
 .agent-gen-status { display:flex; align-items:center; gap:6px; font-size:10px; font-weight:750; color:var(--muted); }
 .agent-gen-status.error { color:#e11d48; }
 .agent-gen-status.done { color:#059669; }
