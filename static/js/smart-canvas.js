@@ -16708,7 +16708,8 @@ Rules:
 - At most 8 generation items.
 - If the user's request is vague or missing key info (topic, style, purpose), ask 1-3 clarifying questions in "reply" and return "generations": [].
 - In "reply", feel free to explain your reasoning or offer multiple options when appropriate.
-- When the user asks for multiple ideas/options, present them in "reply" and let the user choose before generating.`;
+- When the user asks for multiple ideas/options, present them in "reply" and let the user choose before generating.
+- When the user clicks "修改" (modify), they want you to revise the prompt based on their feedback and ask for confirmation again. Do not generate images yet, wait for the user to confirm.`;
 let agentOpen = false;
 let agentSending = false;
 let agentThinking = false;
@@ -16994,8 +16995,9 @@ function agentMessageHtml(msg){
     const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
     const gens = (msg.generations || []).map(agentGenCardHtml).join('');
     const actions = msg.text ? `<div class="agent-msg-actions"><button class="agent-msg-action-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}" title="复制"><i data-lucide="copy"></i></button>${msg.role === 'assistant' ? `<button class="agent-msg-action-btn" type="button" data-agent-retry="${escapeHtml(msg.id)}" title="重试"><i data-lucide="refresh-cw"></i></button>` : ''}</div>` : '';
-    // 结构化 options 字段（仅 assistant 消息）
-    const options = Array.isArray(msg.options) ? msg.options : [];
+    // 结构化 options 字段（仅 assistant 消息，且 generations 为空时显示）
+    const hasGenerations = Array.isArray(msg.generations) && msg.generations.length > 0;
+    const options = (!hasGenerations && Array.isArray(msg.options)) ? msg.options : [];
     const optionsHtml = options.length ? `<div class="agent-msg-options">${options.map(opt => `<button class="agent-msg-option-btn" type="button" data-agent-option="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</button>`).join('')}</div>` : '';
     return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${optionsHtml}${actions}</div>`;
 }
@@ -17040,11 +17042,21 @@ function renderAgentMessages(){
             e.stopPropagation();
             if(agentSending) return;
             const value = btn.dataset.agentOption;
-            if(agentInput){
-                agentInput.value = value;
-                agentInput.focus();
+            if(value === '确认'){
+                // 直接开始生成图片
+                const lastAssistantMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant' && m.generations?.length);
+                if(lastAssistantMsg){
+                    const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+                    runAgentGenerations(lastAssistantMsg, lastUserMsg);
+                }
+            } else {
+                // 发送文本给 LLM
+                if(agentInput){
+                    agentInput.value = value;
+                    agentInput.focus();
+                }
+                sendAgentMessage();
             }
-            sendAgentMessage();
         };
     });
     // 绑定生成图片点击跳转事件
