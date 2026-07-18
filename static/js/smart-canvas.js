@@ -16695,12 +16695,13 @@ const AGENT_NL = String.fromCharCode(10);
 const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent inside an infinite-canvas app. If a skill document is provided above, follow its style and rules closely.
 
 You MUST reply with a raw JSON object only. No markdown fences, no explanation, no extra text:
-{"reply":"your conversational reply","options":[{"label":"确认","value":"确认"},{"label":"修改","value":"修改"}],"generations":[{"prompt":"detailed image prompt in English","count":1,"use_last_outputs":false,"use_attachments":false}]}
+{"reply":"your conversational reply","options":[{"label":"确认","value":"确认"},{"label":"修改","value":"修改"}],"prompts":["detailed image prompt in English"],"generations":[{"prompt":"detailed image prompt in English","count":1,"use_last_outputs":false,"use_attachments":false}]}
 
 Rules:
 - "reply": text shown to the user, written in the user's language.
 - "options": optional array of action buttons shown below your reply. Use when you ask the user to confirm, choose, or decide. Each option has "label" (button text) and "value" (text sent when clicked). Omit or use [] when no options are needed.
-- "generations": images to generate right away. Use [] when no image is needed (questions, chat, prompt discussion).
+- "prompts": optional array of prompt strings when you propose a plan but wait for user confirmation. Use this when you ask the user to confirm before generating. Each prompt is a detailed, self-contained image prompt in English.
+- "generations": images to generate right away. Use [] when no image is needed (questions, chat, prompt discussion) or when waiting for user confirmation (use "prompts" instead).
 - "prompt": detailed, self-contained image prompt written in English unless the skill says otherwise.
 - "count": integer 1 to 8.
 - "use_last_outputs": true when the request refers to or modifies the most recently generated images (they are shown to you and will be used as reference images).
@@ -17054,11 +17055,24 @@ function renderAgentMessages(){
             if(agentSending) return;
             const value = btn.dataset.agentOption;
             if(value === '确认'){
-                // 直接开始生成图片
-                const lastAssistantMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant' && m.generations?.length);
+                // 使用 prompts 构建 generations 并开始生成
+                const lastAssistantMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant' && (m.prompts?.length || m.generations?.length));
                 if(lastAssistantMsg){
                     const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
-                    runAgentGenerations(lastAssistantMsg, lastUserMsg);
+                    // 如果有 prompts 但没有 generations，使用 prompts 构建 generations
+                    if(lastAssistantMsg.prompts?.length && !lastAssistantMsg.generations?.length){
+                        lastAssistantMsg.generations = lastAssistantMsg.prompts.map(prompt => ({
+                            prompt,
+                            count: 1,
+                            use_last_outputs: false,
+                            use_attachments: false,
+                            results: [],
+                            status: 'running'
+                        }));
+                    }
+                    if(lastAssistantMsg.generations?.length){
+                        runAgentGenerations(lastAssistantMsg, lastUserMsg);
+                    }
                 }
             } else {
                 // 发送文本给 LLM（重新生成提示词）
@@ -17277,11 +17291,15 @@ function parseAgentResponse(raw){
                 .filter(o => o && typeof o.label === 'string' && typeof o.value === 'string')
                 .slice(0, 4)
                 .map(o => ({label:o.label.trim(), value:o.value.trim()}));
+            const prompts = (Array.isArray(data.prompts) ? data.prompts : [])
+                .filter(p => typeof p === 'string' && p.trim())
+                .slice(0, AGENT_GEN_MAX_PER_MSG)
+                .map(p => p.trim());
             const generations = (Array.isArray(data.generations) ? data.generations : [])
                 .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
                 .slice(0, AGENT_GEN_MAX_PER_MSG)
                 .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
-            return {reply, options, generations};
+            return {reply, options, prompts, generations};
         } catch(e) { /* 尝试下一个候选 */ }
     }
     return {reply:text, generations:[]};
@@ -17341,7 +17359,7 @@ async function sendAgentMessage(){
         if(requestedCount > 0 && parsed.generations.length > 0 && parsed.generations.length < requestedCount){
             parsed.reply += `${AGENT_NL}(注意：请求了 ${requestedCount} 张，但仅生成了 ${parsed.generations.length} 张的提示词)`;
         }
-        const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], generations:parsed.generations, ts:Date.now()};
+        const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
         agentState.messages.push(assistantMsg);
         agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
         agentThinking = false;
