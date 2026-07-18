@@ -15227,7 +15227,12 @@ function handleAgentLlmDoneMessage(data){
 }
 async function pollAgentLlmTask(taskId){
     if(!taskId) throw new Error('Invalid task ID');
-    for(let i = 0; i < 600; i++){
+    const startTime = Date.now();
+    const MAX_DURATION = 5 * 60 * 1000; // 5 分钟硬超时
+    for(let i = 0; i < 120; i++){
+        if(Date.now() - startTime > MAX_DURATION){
+            throw new Error('LLM task timeout (5min)');
+        }
         const wsNotify = new Promise(resolve => {
             _agentLlmWaiters.set(taskId, (status) => resolve(status || 'done'));
         });
@@ -16783,6 +16788,7 @@ B. 主体更换（use_last_outputs必须为true）：
 let agentOpen = false;
 let agentSending = false;
 let agentThinking = false;
+let agentBypassThinkingNext = false;
 let agentSaveTimer = null;
 let agentState = null;
 let agentMentionIdx = -1;
@@ -16834,6 +16840,16 @@ function loadAgentState(){
 let _agentRecoveryInProgress = false;
 function _setupAgentRecovery(){
     if(!agentState) return;
+    // 超时保护：如果 pending 任务超过 5 分钟，直接清除，不恢复
+    const pendingTs = agentState._pendingLlmTaskTs || 0;
+    if(pendingTs && (Date.now() - pendingTs > 5 * 60 * 1000)){
+        delete agentState._pendingMessage;
+        delete agentState._pendingAttachments;
+        delete agentState._pendingUserMsg;
+        delete agentState._pendingLlmTaskId;
+        delete agentState._pendingLlmTaskTs;
+        saveAgentState();
+    }
     const pendingLlmTaskId = agentState._pendingLlmTaskId;
     const pendingText = String(agentState._pendingMessage || '');
     const pendingAttachments = Array.isArray(agentState._pendingAttachments) ? agentState._pendingAttachments : [];
@@ -16874,6 +16890,7 @@ function _setupAgentRecovery(){
                     delete agentState._pendingAttachments;
                     delete agentState._pendingUserMsg;
                     delete agentState._pendingLlmTaskId;
+                    delete agentState._pendingLlmTaskTs;
                     renderAgentMessages();
                     saveAgentState();
                 }
@@ -16925,6 +16942,7 @@ function _setupAgentRecovery(){
     delete agentState._pendingAttachments;
     delete agentState._pendingUserMsg;
     delete agentState._pendingLlmTaskId;
+    delete agentState._pendingLlmTaskTs;
 }
 function saveAgentState(){
     clearTimeout(agentSaveTimer);
@@ -17169,7 +17187,17 @@ function agentMessageHtml(msg){
     const hasGenerations = Array.isArray(msg.generations) && msg.generations.length > 0;
     const options = (!hasGenerations && Array.isArray(msg.options)) ? msg.options : [];
     const optionsHtml = options.length ? `<div class="agent-msg-options">${options.map(opt => `<button class="agent-msg-option-btn" type="button" data-agent-option="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</button>`).join('')}</div>` : '';
-    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${optionsHtml}${actions}</div>`;
+    // 思维模式提示词确认卡片（有未确认的 prompts 时显示）
+    let promptCardHtml = '';
+    if(msg.role === 'assistant' && Array.isArray(msg.prompts) && msg.prompts.length > 0){
+        const idx = msg.promptIdx || 0;
+        if(idx < msg.prompts.length){
+            const currentPrompt = msg.prompts[idx];
+            const counter = msg.prompts.length > 1 ? ` (${idx + 1}/${msg.prompts.length})` : '';
+            promptCardHtml = `<div class="agent-prompt-card"><div class="agent-prompt-card-header">📝 提示词${counter}</div><div class="agent-prompt-card-body">${escapeHtml(currentPrompt)}</div><div class="agent-prompt-card-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="confirm" data-agent-prompt-id="${escapeHtml(msg.id)}">确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="regenerate" data-agent-prompt-id="${escapeHtml(msg.id)}">重新生成提示词</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="edit" data-agent-prompt-id="${escapeHtml(msg.id)}">修改提示词</button></div></div>`;
+        }
+    }
+    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${promptCardHtml}${optionsHtml}${actions}</div>`;
 }
 function renderAgentMessages(){
     if(!agentMessages || !agentState) return;
@@ -17245,6 +17273,21 @@ function renderAgentMessages(){
                 }
                 sendAgentMessage();
             }
+        };
+    });
+    // 绑定提示词确认卡片按钮事件
+    agentMessages.querySelectorAll('[data-agent-prompt-action]').forEach(btn => {
+        btn.disabled = agentSending;
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const action = btn.dataset.agentPromptAction;
+            const msgId = btn.dataset.agentPromptId;
+            const msg = (agentState.messages || []).find(m => m.id === msgId);
+            if(!msg) return;
+            if(action === 'confirm') confirmAgentPrompt(msg);
+            else if(action === 'regenerate') regenerateAgentPrompts(msg);
+            else if(action === 'edit') editAgentPrompt(msg);
         };
     });
     // 绑定生成图片点击跳转事件
@@ -17668,13 +17711,30 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
     if(requestedCount > 0 && parsed.generations.length > 0 && parsed.generations.length < requestedCount){
         parsed.reply += `${AGENT_NL}(注意：请求了 ${requestedCount} 张，但仅生成了 ${parsed.generations.length} 张的提示词)`;
     }
+    const bypassThinking = userMsg?.bypassThinking === true;
+    const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
+    if(thinkingModeOn){
+        const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
+        const isModifyRequest = userModifyRe.test(text);
+        if(!isModifyRequest){
+            if(parsed.generations.length > 0 && parsed.options.length === 0){
+                parsed.prompts = parsed.generations.map(g => String(g.prompt || '').trim()).filter(p => p);
+                parsed.generations = [];
+            }
+            if(parsed.prompts.length === 0 && parsed.options.length === 0 && parsed.generations.length === 0){
+                parsed.prompts = [text];
+                if(!parsed.reply) parsed.reply = '请确认以下提示词：';
+            }
+        }
+    }
     const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
+    if(assistantMsg.prompts.length > 0) assistantMsg.promptIdx = 0;
     agentState.messages.push(assistantMsg);
     agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
     agentThinking = false;
     renderAgentMessages();
     saveAgentState();
-    if(assistantMsg.generations.length) await runAgentGenerations(assistantMsg, userMsg);
+    if(assistantMsg.generations.length && assistantMsg.prompts.length === 0) await runAgentGenerations(assistantMsg, userMsg);
 }
 async function sendAgentMessage(){
     if(agentSending || !agentState) return;
@@ -17687,6 +17747,9 @@ async function sendAgentMessage(){
     agentState.chatProvider = provider;
     agentState.chatModel = model;
     const userMsg = {id:uid('am'), role:'user', text, images:attachments, ts:Date.now()};
+    const bypassThinking = agentBypassThinkingNext;
+    agentBypassThinkingNext = false;
+    userMsg.bypassThinking = bypassThinking;
     agentState.messages.push(userMsg);
     agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
     agentState.attachments = [];
@@ -17714,7 +17777,7 @@ async function sendAgentMessage(){
         model,
         provider,
         ms_model:provider === 'modelscope' ? model : '',
-        system_prompt:agentSystemPrompt()
+        system_prompt:agentSystemPrompt(bypassThinking)
     };
     try {
         // 创建后端 LLM 任务（息屏/刷新不会丢失）
@@ -17730,10 +17793,12 @@ async function sendAgentMessage(){
         if(!llmTaskId) throw new Error('Failed to create LLM task');
         // 保存 LLM task ID，刷新后可恢复
         agentState._pendingLlmTaskId = llmTaskId;
+        agentState._pendingLlmTaskTs = Date.now();
         saveAgentState();
         // 等待 LLM 结果（WebSocket 实时通知 + 轮询保底）
         const result = await pollAgentLlmTask(llmTaskId);
         delete agentState._pendingLlmTaskId;
+        delete agentState._pendingLlmTaskTs;
         // 处理结果
         await processAgentLlmResult(result, text, attachments, userMsg);
     } catch(e) {
@@ -17751,6 +17816,7 @@ async function sendAgentMessage(){
             delete agentState._pendingAttachments;
             delete agentState._pendingUserMsg;
             delete agentState._pendingLlmTaskId;
+            delete agentState._pendingLlmTaskTs;
             saveAgentState();
         }
         renderAgentMessages();
@@ -17819,6 +17885,109 @@ function agentPendingBoxSize(count, options={}){
     const h = rows * (cellH + 8) + 16;
     return {w, h};
 }
+// 确认当前提示词：创建 generation 并运行，然后展示下一个提示词
+async function confirmAgentPrompt(assistantMsg){
+    const idx = assistantMsg.promptIdx || 0;
+    const prompts = assistantMsg.prompts || [];
+    if(idx >= prompts.length) return;
+    const prompt = prompts[idx];
+    // 找到对应的用户消息（用于 use_attachments 判断）
+    const msgs = agentState.messages || [];
+    const msgIdx = msgs.indexOf(assistantMsg);
+    let userMsg = null;
+    for(let i = msgIdx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
+    }
+    // 创建 generation 并运行
+    const gen = {prompt, count:1, use_last_outputs:false, use_attachments:!!(userMsg?.images?.length), results:[], status:'running'};
+    if(!Array.isArray(assistantMsg.generations)) assistantMsg.generations = [];
+    assistantMsg.generations.push(gen);
+    // 推进到下一个提示词
+    assistantMsg.promptIdx = idx + 1;
+    renderAgentMessages();
+    saveAgentState();
+    // 运行生图（异步，不阻塞下一个提示词的展示）
+    runAgentGenerations(assistantMsg, userMsg);
+}
+// 重新生成提示词：重新发送原始用户消息给 LLM
+async function regenerateAgentPrompts(assistantMsg){
+    const msgs = agentState.messages || [];
+    const msgIdx = msgs.indexOf(assistantMsg);
+    let originalUserText = '';
+    let userMsg = null;
+    for(let i = msgIdx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){
+            originalUserText = msgs[i].text || '';
+            userMsg = msgs[i];
+            break;
+        }
+    }
+    if(!originalUserText) return;
+    const provider = resolveChatProviderId(agentState.chatProvider);
+    const model = resolveChatModel(agentState.chatModel, provider);
+    agentSending = true;
+    agentThinking = true;
+    renderAgentMessages();
+    const llmPayload = {
+        message: originalUserText + '\n\n请重新生成不同方向的提示词，与之前的提示词有所区别。',
+        messages: agentHistoryMessages().slice(0, -1),
+        images: userMsg?.images ? userMsg.images.map(i => i.url) : [],
+        videos: [],
+        model,
+        provider,
+        ms_model: provider === 'modelscope' ? model : '',
+        system_prompt: agentSystemPrompt(false)
+    };
+    try {
+        const taskRes = await fetch('/api/agent-llm-task', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(llmPayload)
+        }).then(async r => {
+            if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.promptLlmFailed')));
+            return r.json();
+        });
+        const result = await pollAgentLlmTask(taskRes.task_id);
+        const parsed = parseAgentResponse(result.text || '', originalUserText);
+        // 替换当前消息的 prompts
+        assistantMsg.prompts = parsed.prompts && parsed.prompts.length > 0 ? parsed.prompts : (parsed.generations && parsed.generations.length > 0 ? parsed.generations.map(g => g.prompt) : [originalUserText]);
+        assistantMsg.promptIdx = 0;
+        if(parsed.reply) assistantMsg.text = parsed.reply;
+        if(parsed.options && parsed.options.length > 0){
+            assistantMsg.options = parsed.options;
+            assistantMsg.prompts = [];
+        } else {
+            assistantMsg.options = [];
+        }
+    } catch(e) {
+        assistantMsg.text = `⚠️ ${String(e.message || e).slice(0, 300)}`;
+    } finally {
+        agentSending = false;
+        agentThinking = false;
+        renderAgentMessages();
+        saveAgentState();
+    }
+}
+// 修改提示词：复制到输入框，设置绕过标志
+function editAgentPrompt(assistantMsg){
+    const idx = assistantMsg.promptIdx || 0;
+    const prompts = assistantMsg.prompts || [];
+    if(idx >= prompts.length) return;
+    const prompt = prompts[idx];
+    if(agentInput){
+        agentInput.value = prompt;
+        agentInput.focus();
+        // 自动调整高度
+        agentInput.style.height = 'auto';
+        agentInput.style.height = Math.min(agentInput.scrollHeight, 200) + 'px';
+    }
+    // 设置绕过标志：下次发送时不走思维模式，直接生图
+    agentBypassThinkingNext = true;
+    // 标记当前提示词已处理（用户选择了修改，不再显示）
+    assistantMsg.promptIdx = (assistantMsg.promptIdx || 0) + 1;
+    renderAgentMessages();
+    saveAgentState();
+}
 async function runAgentGenerations(assistantMsg, userMsg){
     const gens = assistantMsg.generations || [];
     if(!gens.length) return;
@@ -17839,7 +18008,7 @@ async function runAgentGenerations(assistantMsg, userMsg){
     const lastResults = agentLastResults();
     const currentAttach = (userMsg?.images || []).filter(i => i?.url);
     const attachRefs = currentAttach.length ? currentAttach : agentLastUserAttachments();
-    await Promise.all(gens.map(async gen => {
+    await Promise.all(gens.filter(gen => !(gen.results && gen.results.length) && gen.status !== 'done' && gen.status !== 'error').map(async gen => {
         gen.status = 'running';
         renderAgentMessages();
         // 先创建占位节点（复用主画布的 pendingBoxSize 逻辑，按当前选择的比例动态计算）
@@ -18243,6 +18412,21 @@ function initAgentPanel(){
         agentImageInput.value = '';
     });
     agentSendBtn?.addEventListener('click', () => sendAgentMessage());
+    // 思维模式开关按钮
+    const agentThinkingBtn = document.getElementById('agentThinkingBtn');
+    function syncAgentThinkingBtn(){
+        if(agentThinkingBtn){
+            agentThinkingBtn.classList.toggle('active', !!agentState?.thinkingMode);
+        }
+    }
+    syncAgentThinkingBtn();
+    agentThinkingBtn?.addEventListener('click', () => {
+        if(!agentState) return;
+        agentState.thinkingMode = !agentState.thinkingMode;
+        syncAgentThinkingBtn();
+        saveAgentState();
+        toast(agentState.thinkingMode ? '思维模式已开启：扩写/优化提示词' : '思维模式已关闭：直接生成');
+    });
     agentInput?.addEventListener('input', () => {
         const val = agentInput.value;
         const cursorPos = agentInput.selectionStart || 0;
