@@ -17772,7 +17772,8 @@ function agentCenterOnNode(node){
 }
 function agentFindEmptyPosition(count=1){
     // A+C 方案：计算空白区域 + 右侧追加（水平排列，顶部对齐）
-    const imageNodes = (nodes || []).filter(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url));
+    // 注意：必须包含 pending 状态的占位节点，否则并发生成多张图时占位节点会叠在一起
+    const imageNodes = (nodes || []).filter(n => isSmartImageNode(n) && ((n.images || []).some(img => img?.url) || Number(n.pending) > 0));
     const center = viewportCenter();
     if(!imageNodes.length) return {x:center.x, y:center.y};
     // 找到最右边的节点
