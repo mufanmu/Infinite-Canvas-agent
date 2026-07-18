@@ -6,8 +6,10 @@ Supports comfyui/API calls/modelscope calls
 ## 本分支改动说明（AI Agent 版）
 
 > 本仓库是基于原项目 [hero8152/Infinite-Canvas](https://github.com/hero8152/Infinite-Canvas) 的二次开发 fork，新增了智能画布 AI Agent 面板。
+>
+> **当前版本：v1.1**（查看 [版本更新日志](#版本更新日志)）
 
-### 新增功能
+### v1.0 新增功能（AI Agent 面板基线）
 1. AI Agent 侧边聊天面板（OneBox 风格），可与画布联动生图。
 2. `@` 引用当前画布中的图片，最新的图片排在最上面。
 3. 统一附件管理：Skill 文档与图片在同一处增删改查，支持一次上传多个。
@@ -19,6 +21,33 @@ Supports comfyui/API calls/modelscope calls
 9. 生图占位：生成开始时先在画布放置占位骨架，完成后替换为实际图片；多张并发生成、顶部对齐向右排列。
 10. 在画布选中图片的悬浮工具栏最左侧新增「发送至 Agent」按钮。
 
+### v1.1 更新内容
+
+#### 一、Agent 对话与意图理解
+1. **系统提示词重写**：精简为 5 种对话模式（直接生成 / 确认 / 多选 / 澄清 / 批量），强制中文提示词，避免 LLM 返回纯文字不生图。
+2. **修改场景智能区分**：区分「风格修改」（换成像素风 → 引用原图编辑）与「主体更换」（龙换成马 → 引用原图替换主体并保留场景），给出不同的 prompt 模板，避免主体换不掉或场景丢失。
+3. **文字规则按需判断**：prompt 默认不含文字（标题/对白/字幕），仅在 skill 文档明确要求或用户主动要求「加文字/标题」时才用引号标注文字内容。
+4. **非 JSON 回复兜底解析**：LLM 未遵循 JSON 格式时，自动提取编号选项与澄清问题，保证交互不中断。
+5. **修改意图链路修复**：确认模式下用户点击「确认」后，正确继承上一轮的修改意图，不再断裂。
+
+#### 二、生图稳定性与架构
+6. **LLM 任务后端化**：新增 `/api/agent-llm-task` 后端任务系统，LLM 推理在后端运行，前端通过 WebSocket 实时通知 + 轮询保底获取结果。页面刷新 / 息屏不再丢失思考状态。
+7. **生图任务恢复**：刷新后自动恢复后端仍在运行的生图任务（通过 `taskIds` + `placeholderNodeId`），不丢失已提交的生图。
+8. **WebSocket 实时通知**：生图完成时后端主动推送 `canvas_task_done` / `agent_llm_done`，前端无需等待轮询间隔，降低延迟。
+9. **agy CLI 生图修复**：Antigravity CLI 返回纯文字无法生图时，自动回退到 `gpt-image-2-skill` 执行生图。
+
+#### 三、画布占位与比例
+10. **占位按选中比例展示**：占位节点始终按用户当前选择的比例（1:1 / 16:9 / 9:16 等）计算尺寸，不再错误使用参考图比例。
+11. **生图后尺寸重算**：生图完成后删除占位的 `w/h`，让节点按实际图片自然尺寸重新计算（与主画布 `finalizePendingNode` 行为一致），双击放大与画布显示比例一致。
+12. **占位顶部对齐**：新占位节点与已有图片节点顶部对齐，不再阶梯式错位。
+13. **占位计时修复**：占位节点显示正确的正计时（`runStartedAt` → `runFinishedAt`），不再卡在 0。
+14. **并发多图不叠加**：修复一次性生成多张图时占位节点叠在同一位置的问题（位置计算纳入 pending 占位节点）。
+
+#### 四、交互体验
+15. **提示词展开/收起**：Agent 生图卡片支持点击展开完整 prompt，收起时显示 5 行。
+16. **复制优先 prompt**：复制 Agent 消息时优先复制生图 prompt，而非「正在生图中」状态文字。
+17. **多选场景自由输入提示**：仅在需要用户多选/澄清时显示「也可直接输入」提示，不常驻。
+
 ### 重要警示
 - **已关闭自动更新**：导航栏版本号显示为「Agent版(无自动更新)」。若从上游拉取/合并最新代码，可能覆盖本分支的 AI Agent 功能，请谨慎操作并先备份。
 - **main 分支与上游分叉**：本 fork 的 `main` 通过强制推送覆盖，历史与上游不一致，切勿直接向上游发起合并。
@@ -26,6 +55,13 @@ Supports comfyui/API calls/modelscope calls
 - **不要提交 API Key到仓库**：请在软件自带的「API 设置」界面填写 Key/URL，不要写入代码或提交到仓库（`.gitignore` 已排除敏感文件与运行时数据）。
 
 > This fork adds an AI Agent panel to the canvas. Auto-update is disabled; pulling upstream changes may overwrite the Agent features. The `main` branch was force-pushed and diverges from upstream. Do not commit API keys. Commercial use remains prohibited.
+
+### 版本更新日志
+
+| 版本 | 日期 | 说明 |
+|------|------|------|
+| v1.0 | 2026-07-18 | AI Agent 面板基线：聊天面板、画布联动生图、多对话管理、参数面板、结构化确认流程、生图占位 |
+| v1.1 | 2026-07-19 | 系统提示词重写、修改场景智能区分、LLM 任务后端化、刷新恢复、WebSocket 实时通知、占位比例修复、并发多图不叠加、提示词展开收起 |
 
 ----
 
