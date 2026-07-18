@@ -75,6 +75,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def no_cache_html_middleware(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path.lower()
+    if path.endswith(".html"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
 # --- WebSocket 状态管理器 ---
 class ConnectionManager:
     def __init__(self):

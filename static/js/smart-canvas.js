@@ -50,6 +50,30 @@ const assetDialogInput = document.getElementById('assetDialogInput');
 const assetDialogCancel = document.getElementById('assetDialogCancel');
 const assetDialogOk = document.getElementById('assetDialogOk');
 const assetHoverPreview = document.getElementById('assetHoverPreview');
+const agentToggle = document.getElementById('agentToggle');
+const agentPanel = document.getElementById('agentPanel');
+const agentCloseBtn = document.getElementById('agentCloseBtn');
+const agentClearBtn = document.getElementById('agentClearBtn');
+const agentSkillDrop = document.getElementById('agentSkillDrop');
+const agentSkillInput = document.getElementById('agentSkillInput');
+const agentSkillCard = document.getElementById('agentSkillCard');
+const agentSkillName = document.getElementById('agentSkillName');
+const agentSkillSize = document.getElementById('agentSkillSize');
+const agentSkillRemove = document.getElementById('agentSkillRemove');
+const agentChatProvider = document.getElementById('agentChatProvider');
+const agentChatModel = document.getElementById('agentChatModel');
+const agentGenProvider = document.getElementById('agentGenProvider');
+const agentGenModel = document.getElementById('agentGenModel');
+const agentGenRatio = document.getElementById('agentGenRatio');
+const agentGenResolution = document.getElementById('agentGenResolution');
+const agentGenCount = document.getElementById('agentGenCount');
+const agentAutoContext = document.getElementById('agentAutoContext');
+const agentMessages = document.getElementById('agentMessages');
+const agentAttachRow = document.getElementById('agentAttachRow');
+const agentAttachBtn = document.getElementById('agentAttachBtn');
+const agentImageInput = document.getElementById('agentImageInput');
+const agentInput = document.getElementById('agentInput');
+const agentSendBtn = document.getElementById('agentSendBtn');
 const promptPresetPanel = document.getElementById('promptPresetPanel');
 const promptPresetClose = document.getElementById('promptPresetClose');
 const promptPresetStatus = document.getElementById('promptPresetStatus');
@@ -5290,6 +5314,7 @@ function setAssetLibraryFromResponse(data, options={}){
 function toggleAssetLibrary(open=!assetLibraryOpen){
     if(!assetPanel || !assetToggle) return;
     assetLibraryOpen = !!open;
+    if(assetLibraryOpen) toggleAgentPanel(false);
     assetPanel.classList.toggle('open', assetLibraryOpen);
     assetToggle?.classList.toggle('active', assetLibraryOpen);
     if(assetLibraryOpen) loadAssetLibrary();
@@ -8016,7 +8041,7 @@ function handlePortDrop(drag, e){
         return;
     }
     if(!drag.moved){ discardPendingUndo(); render(); return; }
-    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
+    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
         discardPendingUndo(); render(); return;
     }
     const p = screenToWorld(e);
@@ -15554,14 +15579,14 @@ function createNodeFromMenu(type){
 shell.addEventListener('mousedown', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
 }, true);
 shell.addEventListener('click', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
     const nodeEl = e.target.closest('.image-node');
@@ -15569,8 +15594,8 @@ shell.addEventListener('click', e => {
     else exitZoomPreview(screenToWorld(e));
 }, true);
 shell.onmousedown = e => {
-    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
-    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
+    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
     closeCreateMenu();
     if(e.button === 0 && e.shiftKey){
         e.preventDefault();
@@ -15607,7 +15632,7 @@ shell.oncontextmenu = e => {
         e.stopPropagation();
         return;
     }
-    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -15623,14 +15648,14 @@ shell.oncontextmenu = e => {
     openCreateMenu(e);
 };
 shell.ondblclick = e => {
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     openCreateMenu(e);
 };
 shell.onclick = e => {
     if(selectionJustFinished) return;
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     closeCreateMenu();
     clearSelection();
@@ -16110,7 +16135,7 @@ window.onmouseup = e => {
     }
 };
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
+    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
     e.preventDefault();
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -16649,6 +16674,467 @@ assetDropZone?.addEventListener('drop', handleAssetPanelDrop);
 assetPanel?.addEventListener('dragover', handleAssetPanelDragOver);
 assetPanel?.addEventListener('dragleave', e => { if(!assetPanel?.contains(e.relatedTarget)) setAssetDragOver(false); });
 assetPanel?.addEventListener('drop', handleAssetPanelDrop);
+// ==================== AI Agent 侧边面板 ====================
+const AGENT_STORAGE_PREFIX = 'smart_agent_v1:';
+const AGENT_SKILL_MAX_BYTES = 512 * 1024;
+const AGENT_HISTORY_MAX = 20;
+const AGENT_LLM_IMAGE_MAX = 8;
+const AGENT_GEN_MAX_PER_MSG = 4;
+const AGENT_MSG_MAX = 60;
+const AGENT_NL = String.fromCharCode(10);
+const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent inside an infinite-canvas app. If a skill document is provided above, follow its style and rules closely.
+
+You MUST reply with a raw JSON object only. No markdown fences, no explanation, no extra text:
+{"reply":"your conversational reply","generations":[{"prompt":"detailed image prompt in English","count":1,"use_last_outputs":false,"use_attachments":false}]}
+
+Rules:
+- "reply": text shown to the user, written in the user's language.
+- "generations": images to generate right away. Use [] when no image is needed (questions, chat, prompt discussion).
+- "prompt": detailed, self-contained image prompt written in English unless the skill says otherwise.
+- "count": integer 1 to 4.
+- "use_last_outputs": true when the request refers to or modifies the most recently generated images (they are shown to you and will be used as reference images).
+- "use_attachments": true when the request refers to or modifies images the user attached.
+- At most 4 generation items.`;
+let agentOpen = false;
+let agentSending = false;
+let agentThinking = false;
+let agentAttachments = [];
+let agentSaveTimer = null;
+let agentState = null;
+function agentDefaultState(){
+    return {skill:null, messages:[], chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, autoContext:true};
+}
+function agentStorageKey(){ return AGENT_STORAGE_PREFIX + (canvasId || 'default'); }
+// 生图 provider 列表：与主画布的 imageProviders() 不同，这里不排除 modelscope/volcengine，
+// 因为后端 /api/canvas-image-tasks 统一支持它们（主画布排除它们仅因专用引擎 UI）。
+function agentGenProviders(){
+    return (apiProviders || []).filter(p => p.enabled !== false && (p.image_models || []).length);
+}
+function loadAgentState(){
+    agentState = agentDefaultState();
+    try {
+        const raw = localStorage.getItem(agentStorageKey());
+        if(raw){
+            const data = JSON.parse(raw);
+            if(data && typeof data === 'object') agentState = {...agentState, ...data, messages:Array.isArray(data.messages) ? data.messages : []};
+        }
+    } catch(e) { agentState = agentDefaultState(); }
+    agentState.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+}
+function saveAgentState(){
+    clearTimeout(agentSaveTimer);
+    agentSaveTimer = setTimeout(() => {
+        try {
+            const data = {...agentState, messages:(agentState.messages || []).slice(-AGENT_MSG_MAX)};
+            localStorage.setItem(agentStorageKey(), JSON.stringify(data));
+        } catch(e) { /* localStorage 写满时静默忽略 */ }
+    }, 200);
+}
+function toggleAgentPanel(open=!agentOpen){
+    if(!agentPanel || !agentToggle) return;
+    agentOpen = !!open;
+    if(agentOpen) toggleAssetLibrary(false);
+    agentPanel.classList.toggle('open', agentOpen);
+    agentToggle.classList.toggle('active', agentOpen);
+    if(agentOpen){
+        renderAgentModelSelectors();
+        renderAgentMessages();
+    }
+}
+function renderAgentModelSelectors(){
+    if(!agentState) return;
+    const chatProviders = chatApiProviders();
+    if(agentChatProvider){
+        agentState.chatProvider = chatProviders.length ? resolveChatProviderId(agentState.chatProvider) : '';
+        agentChatProvider.innerHTML = chatProviders.length ? chatProviderOptions(agentState.chatProvider) : `<option value="">${escapeHtml(tr('smart.agentNoProviders'))}</option>`;
+    }
+    if(agentChatModel){
+        agentState.chatModel = chatProviders.length ? resolveChatModel(agentState.chatModel, agentState.chatProvider) : '';
+        agentChatModel.innerHTML = chatProviders.length ? chatModelOptions(agentState.chatModel, agentState.chatProvider) : '<option value="">-</option>';
+    }
+    const genProviders = agentGenProviders();
+    if(agentGenProvider){
+        if(genProviders.length){
+            if(!genProviders.some(p => p.id === agentState.genProvider)) agentState.genProvider = genProviders[0].id;
+            agentGenProvider.innerHTML = genProviders.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === agentState.genProvider ? 'selected' : ''}>${escapeHtml(p.name || p.id)}</option>`).join('');
+        } else {
+            agentState.genProvider = '';
+            agentGenProvider.innerHTML = `<option value="">${escapeHtml(tr('smart.agentNoProviders'))}</option>`;
+        }
+    }
+    if(agentGenModel){
+        const models = agentState.genProvider ? providerImageModels(agentState.genProvider) : [];
+        if(models.length){
+            if(!models.includes(agentState.genModel)) agentState.genModel = models[0];
+            agentGenModel.innerHTML = models.map(m => `<option value="${escapeHtml(m)}" ${m === agentState.genModel ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+        } else {
+            agentState.genModel = '';
+            agentGenModel.innerHTML = '<option value="">-</option>';
+        }
+    }
+    if(agentGenRatio) agentGenRatio.value = agentState.genRatio || 'square';
+    if(agentGenResolution) agentGenResolution.value = agentState.genResolution || '1k';
+    if(agentGenCount) agentGenCount.value = String(agentState.genCount || 1);
+    if(agentAutoContext) agentAutoContext.checked = agentState.autoContext !== false;
+}
+function renderAgentSkill(){
+    const skill = agentState?.skill;
+    if(agentSkillDrop) agentSkillDrop.style.display = skill ? 'none' : '';
+    if(agentSkillCard) agentSkillCard.style.display = skill ? '' : 'none';
+    if(skill){
+        if(agentSkillName) agentSkillName.textContent = skill.name || 'skill.md';
+        if(agentSkillSize) agentSkillSize.textContent = `${Math.max(1, Math.round(String(skill.content || '').length / 1024))} KB`;
+    }
+}
+function setAgentSkillFile(file){
+    if(!file || !agentState) return;
+    if(file.size > AGENT_SKILL_MAX_BYTES){ toast(tr('smart.agentSkillTooBig')); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+        agentState.skill = {name:file.name || 'skill.md', content:String(reader.result || '')};
+        renderAgentSkill();
+        saveAgentState();
+        toast(`${tr('smart.agentSkillLoaded')}: ${file.name}`);
+    };
+    reader.readAsText(file);
+}
+function renderAgentAttachments(){
+    if(!agentAttachRow) return;
+    agentAttachRow.innerHTML = agentAttachments.map((att, i) => `<div class="agent-attach-chip"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`).join('');
+    if(window.lucide) lucide.createIcons();
+    agentAttachRow.querySelectorAll('[data-agent-att-remove]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            agentAttachments.splice(Number(btn.dataset.agentAttRemove) || 0, 1);
+            renderAgentAttachments();
+        };
+    });
+}
+async function agentAttachFiles(files){
+    const list = [...(files || [])].filter(f => String(f.type || '').startsWith('image/')).slice(0, AGENT_LLM_IMAGE_MAX);
+    if(!list.length) return;
+    try {
+        const uploaded = await uploadFiles(list);
+        (uploaded || []).filter(f => f?.url).forEach(f => {
+            if(agentAttachments.length < AGENT_LLM_IMAGE_MAX) agentAttachments.push({url:f.url, name:f.name || 'image'});
+        });
+        renderAgentAttachments();
+    } catch(e) {
+        toast(String(e.message || e).slice(0, 120));
+    }
+}
+function agentGenCardHtml(gen){
+    const status = gen.status || 'running';
+    const statusText = status === 'done' ? tr('smart.agentGenDone') : status === 'error' ? tr('smart.agentGenFail') : tr('smart.agentGenerating');
+    const refTags = [gen.use_last_outputs ? tr('smart.agentRefLast') : '', gen.use_attachments ? tr('smart.agentRefAttach') : ''].filter(Boolean).join(' · ');
+    const thumbs = (gen.results || []).filter(r => r?.url).map(r => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy">`).join('');
+    return `<div class="agent-gen-card"><div class="agent-gen-prompt">${escapeHtml(gen.prompt || '')}</div><div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${refTags ? ' · ' + escapeHtml(refTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
+}
+function agentMessageHtml(msg){
+    const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
+    const gens = (msg.generations || []).map(agentGenCardHtml).join('');
+    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}</div>`;
+}
+function renderAgentMessages(){
+    if(!agentMessages || !agentState) return;
+    const msgs = agentState.messages || [];
+    if(!msgs.length && !agentThinking){
+        agentMessages.innerHTML = `<div class="agent-empty"><i data-lucide="bot"></i>${escapeHtml(tr('smart.agentEmpty'))}</div>`;
+    } else {
+        const thinking = agentThinking ? `<div class="agent-msg assistant"><div class="agent-msg-bubble"><span class="agent-gen-spinner" style="display:inline-block;vertical-align:-2px;margin-right:6px"></span>${escapeHtml(tr('smart.agentThinking'))}</div></div>` : '';
+        agentMessages.innerHTML = msgs.map(agentMessageHtml).join('') + thinking;
+    }
+    if(window.lucide) lucide.createIcons();
+    agentMessages.scrollTop = agentMessages.scrollHeight;
+    if(agentSendBtn) agentSendBtn.disabled = agentSending;
+}
+function agentLastResults(){
+    const msgs = agentState?.messages || [];
+    for(let i = msgs.length - 1; i >= 0; i--){
+        const results = (msgs[i].generations || []).flatMap(g => (g.results || []).filter(r => r?.url));
+        if(results.length) return results;
+    }
+    return [];
+}
+function agentLastUserAttachments(){
+    const msgs = agentState?.messages || [];
+    for(let i = msgs.length - 1; i >= 0; i--){
+        if(msgs[i].role === 'user' && (msgs[i].images || []).some(img => img?.url)) return msgs[i].images.filter(img => img?.url);
+    }
+    return [];
+}
+function agentSystemPrompt(){
+    const parts = [];
+    const skill = String(agentState?.skill?.content || '').trim();
+    if(skill) parts.push(`Follow this skill document "${agentState.skill.name}" closely:${AGENT_NL}${AGENT_NL}${skill}`);
+    parts.push(AGENT_FORMAT_INSTRUCTION);
+    return parts.join(AGENT_NL + AGENT_NL);
+}
+function agentHistoryMessages(){
+    return (agentState.messages || []).slice(-AGENT_HISTORY_MAX).map(m => {
+        if(m.role === 'user') return {role:'user', content:m.text || '(images only)'};
+        let content = m.text || '';
+        (m.generations || []).forEach(g => {
+            const n = (g.results || []).length;
+            if(n) content += `${AGENT_NL}[generated ${n} image(s) with prompt: ${g.prompt || ''}]`;
+        });
+        return {role:'assistant', content:content || '(no text)'};
+    });
+}
+function parseAgentResponse(raw){
+    const text = String(raw || '').trim();
+    const candidates = [text];
+    if(text.includes('```')){
+        const firstFence = text.indexOf('```');
+        const secondFence = text.indexOf('```', firstFence + 3);
+        if(secondFence > firstFence){
+            let inner = text.slice(firstFence + 3, secondFence).trim();
+            if(inner.startsWith('json')) inner = inner.slice(4).trim();
+            if(inner) candidates.unshift(inner);
+        }
+    }
+    const braceStart = text.indexOf('{');
+    const braceEnd = text.lastIndexOf('}');
+    if(braceStart >= 0 && braceEnd > braceStart) candidates.push(text.slice(braceStart, braceEnd + 1));
+    for(const candidate of candidates){
+        try {
+            const data = JSON.parse(candidate);
+            if(!data || typeof data !== 'object') continue;
+            const reply = typeof data.reply === 'string' ? data.reply : (typeof data.text === 'string' ? data.text : '');
+            const generations = (Array.isArray(data.generations) ? data.generations : [])
+                .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
+                .slice(0, AGENT_GEN_MAX_PER_MSG)
+                .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(4, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
+            return {reply, generations};
+        } catch(e) { /* 尝试下一个候选 */ }
+    }
+    return {reply:text, generations:[]};
+}
+async function sendAgentMessage(){
+    if(agentSending || !agentState) return;
+    const text = String(agentInput?.value || '').trim();
+    const attachments = agentAttachments.slice();
+    if(!text && !attachments.length) return;
+    if(!chatApiProviders().length){ toast(tr('smart.agentNeedChatModel')); return; }
+    const provider = resolveChatProviderId(agentState.chatProvider);
+    const model = resolveChatModel(agentState.chatModel, provider);
+    agentState.chatProvider = provider;
+    agentState.chatModel = model;
+    const userMsg = {id:uid('am'), role:'user', text, images:attachments, ts:Date.now()};
+    agentState.messages.push(userMsg);
+    agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+    agentAttachments = [];
+    if(agentInput) agentInput.value = '';
+    renderAgentAttachments();
+    agentSending = true;
+    agentThinking = true;
+    renderAgentMessages();
+    saveAgentState();
+    const contextImages = attachments.slice();
+    if(agentState.autoContext !== false){
+        [...agentLastResults(), ...agentLastUserAttachments()].forEach(item => {
+            if(item?.url && contextImages.length < AGENT_LLM_IMAGE_MAX && !contextImages.some(i => i.url === item.url)) contextImages.push(item);
+        });
+    }
+    try {
+        const result = await fetch('/api/canvas-llm', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                message:text || '(please help me edit these images)',
+                messages:agentHistoryMessages().slice(0, -1),
+                images:contextImages.slice(0, AGENT_LLM_IMAGE_MAX).map(i => i.url),
+                videos:[],
+                model,
+                provider,
+                ms_model:provider === 'modelscope' ? model : '',
+                system_prompt:agentSystemPrompt()
+            })
+        }).then(async r => {
+            if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.promptLlmFailed')));
+            return r.json();
+        });
+        const parsed = parseAgentResponse(result.text || '');
+        const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, generations:parsed.generations, ts:Date.now()};
+        agentState.messages.push(assistantMsg);
+        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+        agentThinking = false;
+        renderAgentMessages();
+        saveAgentState();
+        if(assistantMsg.generations.length) await runAgentGenerations(assistantMsg, userMsg);
+    } catch(e) {
+        agentThinking = false;
+        agentState.messages.push({id:uid('am'), role:'assistant', text:`⚠️ ${String(e.message || e).slice(0, 300)}`, generations:[], ts:Date.now()});
+        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+        renderAgentMessages();
+        saveAgentState();
+    } finally {
+        agentSending = false;
+        agentThinking = false;
+        renderAgentMessages();
+    }
+}
+async function runAgentGenerations(assistantMsg, userMsg){
+    const gens = assistantMsg.generations || [];
+    if(!gens.length) return;
+    const genProviders = agentGenProviders();
+    if(!genProviders.length){
+        gens.forEach(g => { g.status = 'error'; g.error = tr('smart.agentNeedGenModel'); });
+        toast(tr('smart.agentNeedGenModel'));
+        renderAgentMessages();
+        saveAgentState();
+        return;
+    }
+    const providerId = genProviders.some(p => p.id === agentState.genProvider) ? agentState.genProvider : genProviders[0].id;
+    const models = providerImageModels(providerId);
+    const genModel = models.includes(agentState.genModel) ? agentState.genModel : (models[0] || '');
+    agentState.genProvider = providerId;
+    agentState.genModel = genModel;
+    const size = apiImageSize(agentState.genRatio || 'square', agentState.genResolution || '1k') || '1024x1024';
+    const lastResults = agentLastResults();
+    const currentAttach = (userMsg?.images || []).filter(i => i?.url);
+    const attachRefs = currentAttach.length ? currentAttach : agentLastUserAttachments();
+    let offset = 0;
+    for(const gen of gens){
+        gen.status = 'running';
+        renderAgentMessages();
+        try {
+            let refs = [];
+            if(gen.use_last_outputs) refs = refs.concat(lastResults);
+            if(gen.use_attachments) refs = refs.concat(attachRefs);
+            refs = imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX).map(r => ({url:r.url, name:r.name || 'ref'}));
+            const payload = {prompt:gen.prompt, provider_id:providerId, model:genModel, size, quality:'auto', n:1, reference_images:refs};
+            const tasks = await Promise.all(Array.from({length:gen.count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
+                if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.agentGenFail')));
+                return r.json();
+            })));
+            const results = await Promise.all(tasks.map(t => t.task_id).filter(Boolean).map(id => pollSmartCanvasTask(id)));
+            const urls = results.flatMap(res => resultMediaUrls(res)).map((item, i) => {
+                const url = typeof item === 'string' ? item : item?.url || '';
+                return {url, name:(typeof item === 'object' && item?.name) || `agent-${Date.now()}-${i + 1}.png`, kind:'image'};
+            }).filter(i => i.url);
+            gen.results = urls;
+            gen.status = 'done';
+            if(urls.length){
+                const center = viewportCenter();
+                undoSuppressed = true;
+                const node = createImageNodeAt({x:center.x + offset, y:center.y + offset}, urls.map(u => ({...u})));
+                undoSuppressed = false;
+                offset += 48;
+                if(node) selectedId = node.id;
+            }
+        } catch(e) {
+            gen.status = 'error';
+            gen.error = String(e.message || e).slice(0, 200);
+        }
+        renderAgentMessages();
+        saveAgentState();
+    }
+    render();
+    scheduleSave();
+}
+function initAgentPanel(){
+    if(!agentPanel) return;
+    loadAgentState();
+    renderAgentModelSelectors();
+    renderAgentSkill();
+    renderAgentAttachments();
+    renderAgentMessages();
+    agentToggle?.addEventListener('click', () => toggleAgentPanel());
+    agentCloseBtn?.addEventListener('click', () => toggleAgentPanel(false));
+    agentClearBtn?.addEventListener('click', () => {
+        if(!agentState) return;
+        agentState.messages = [];
+        renderAgentMessages();
+        saveAgentState();
+    });
+    agentSkillDrop?.addEventListener('click', () => agentSkillInput?.click());
+    agentSkillInput?.addEventListener('change', () => {
+        setAgentSkillFile(agentSkillInput.files?.[0]);
+        agentSkillInput.value = '';
+    });
+    agentSkillRemove?.addEventListener('click', e => {
+        e.stopPropagation();
+        agentState.skill = null;
+        renderAgentSkill();
+        saveAgentState();
+    });
+    ['dragenter', 'dragover'].forEach(evt => agentSkillDrop?.addEventListener(evt, e => {
+        e.preventDefault();
+        e.stopPropagation();
+        agentSkillDrop.classList.add('drag-over');
+    }));
+    agentSkillDrop?.addEventListener('dragleave', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if(!agentSkillDrop.contains(e.relatedTarget)) agentSkillDrop.classList.remove('drag-over');
+    });
+    agentSkillDrop?.addEventListener('drop', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        agentSkillDrop.classList.remove('drag-over');
+        const file = [...(e.dataTransfer?.files || [])].find(f => {
+            const name = String(f.name || '').toLowerCase();
+            return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt');
+        });
+        if(file) setAgentSkillFile(file);
+    });
+    agentChatProvider?.addEventListener('change', () => {
+        agentState.chatProvider = agentChatProvider.value;
+        agentState.chatModel = '';
+        renderAgentModelSelectors();
+        saveAgentState();
+    });
+    agentChatModel?.addEventListener('change', () => { agentState.chatModel = agentChatModel.value; saveAgentState(); });
+    agentGenProvider?.addEventListener('change', () => {
+        agentState.genProvider = agentGenProvider.value;
+        agentState.genModel = '';
+        renderAgentModelSelectors();
+        saveAgentState();
+    });
+    agentGenModel?.addEventListener('change', () => { agentState.genModel = agentGenModel.value; saveAgentState(); });
+    agentGenRatio?.addEventListener('change', () => { agentState.genRatio = agentGenRatio.value; saveAgentState(); });
+    agentGenResolution?.addEventListener('change', () => { agentState.genResolution = agentGenResolution.value; saveAgentState(); });
+    agentGenCount?.addEventListener('change', () => { agentState.genCount = Number(agentGenCount.value) || 1; saveAgentState(); });
+    agentAutoContext?.addEventListener('change', () => { agentState.autoContext = !!agentAutoContext.checked; saveAgentState(); });
+    agentAttachBtn?.addEventListener('click', () => agentImageInput?.click());
+    agentImageInput?.addEventListener('change', () => {
+        agentAttachFiles(agentImageInput.files);
+        agentImageInput.value = '';
+    });
+    agentSendBtn?.addEventListener('click', () => sendAgentMessage());
+    agentInput?.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+            e.preventDefault();
+            sendAgentMessage();
+        }
+    });
+    agentInput?.addEventListener('keyup', e => e.stopPropagation());
+    agentInput?.addEventListener('paste', e => {
+        e.stopPropagation();
+        const files = [...(e.clipboardData?.files || [])].filter(f => String(f.type || '').startsWith('image/'));
+        if(files.length){
+            e.preventDefault();
+            agentAttachFiles(files);
+        }
+    });
+    ['dragenter', 'dragover'].forEach(evt => agentPanel.addEventListener(evt, e => {
+        e.preventDefault();
+        e.stopPropagation();
+        agentPanel.classList.add('drag-over-input');
+    }));
+    agentPanel.addEventListener('dragleave', e => {
+        if(!agentPanel.contains(e.relatedTarget)) agentPanel.classList.remove('drag-over-input');
+    });
+    agentPanel.addEventListener('drop', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        agentPanel.classList.remove('drag-over-input');
+        const files = [...(e.dataTransfer?.files || [])].filter(f => String(f.type || '').startsWith('image/'));
+        if(files.length) agentAttachFiles(files);
+    });
+}
 createMenu?.addEventListener('mousedown', event => event.stopPropagation());
 createMenu?.addEventListener('click', event => {
     event.stopPropagation();
@@ -17012,6 +17498,9 @@ window.addEventListener('studio-lang-change', () => {
     renderDynamicParams();
     renderInputThumbsRow(selectedNode());
     renderAssetLibrary();
+    renderAgentModelSelectors();
+    renderAgentSkill();
+    renderAgentMessages();
     if(document.getElementById('imageEditModal')?.classList.contains('open')){
         setImageEditMode(imageEditMode);
     }
@@ -17030,6 +17519,7 @@ window.onload = async () => {
     await loadConfig();
     await loadAssetLibrary();
     await loadCanvas();
+    initAgentPanel();
     syncApiKindToggleVisibility();
     render();
 };
