@@ -1214,6 +1214,31 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-send-btn i,.agent-send-btn svg { width:14px; height:14px; }
 .agent-panel.drag-over-input .agent-input-row textarea { border-color:var(--strong); }
 
+/* Skill 附件卡片（在附件行中） */
+.agent-attach-skill { position:relative; display:flex; align-items:center; gap:6px; height:44px; padding:0 28px 0 8px; border-radius:10px; border:1px solid var(--line); background:var(--card); max-width:160px; }
+.agent-attach-skill > i,.agent-attach-skill > svg { width:14px; height:14px; color:var(--strong); flex:0 0 auto; }
+.agent-attach-skill-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; font-weight:700; color:var(--text); }
+.agent-attach-skill button { position:absolute; top:2px; right:2px; width:15px; height:15px; border-radius:50%; background:rgba(15,23,42,.78); color:#fff; display:flex; align-items:center; justify-content:center; border:none; cursor:pointer; padding:0; }
+.agent-attach-skill button i,.agent-attach-skill button svg { width:9px; height:9px; }
+
+/* @ 引用面板 */
+.agent-mention-panel { position:absolute; bottom:100%; left:0; right:0; max-height:240px; overflow-y:auto; border-radius:13px; border:1px solid var(--line); background:var(--card); box-shadow:0 -4px 24px rgba(15,23,42,.12); z-index:50; margin-bottom:4px; }
+.agent-mention-panel:empty { display:none; }
+.agent-mention-item { display:flex; align-items:center; gap:8px; padding:7px 10px; cursor:pointer; border:none; background:none; width:100%; text-align:left; }
+.agent-mention-item:hover,.agent-mention-item.active { background:var(--soft); }
+.agent-mention-item img { width:32px; height:32px; border-radius:7px; object-fit:cover; flex:0 0 auto; border:1px solid var(--line); }
+.agent-mention-item-info { flex:1; min-width:0; }
+.agent-mention-item-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10.5px; font-weight:700; color:var(--text); }
+.agent-mention-item-time { font-size:9px; font-weight:600; color:var(--faint); }
+.agent-mention-empty { padding:12px; text-align:center; font-size:10.5px; color:var(--faint); }
+
+/* 输入框拖拽手柄 */
+.agent-input-resize { height:6px; cursor:ns-resize; display:flex; align-items:center; justify-content:center; border-radius:0 0 13px 13px; transition:background .14s ease; }
+.agent-input-resize:hover,.agent-input-resize.dragging { background:var(--soft); }
+.agent-input-resize::after { content:''; width:32px; height:3px; border-radius:999px; background:var(--line); transition:background .14s ease; }
+.agent-input-resize:hover::after,.agent-input-resize.dragging::after { background:var(--strong); }
+.agent-input-area { position:relative; }
+
 .asset-item { min-width:0; align-self:start; border-radius:12px; border:1px solid var(--line); background:var(--card); overflow:hidden; cursor:grab; }
 .asset-item:active { cursor:grabbing; }
 .asset-thumb { width:100%; aspect-ratio:1/1; background:var(--soft); display:block; object-fit:cover; }

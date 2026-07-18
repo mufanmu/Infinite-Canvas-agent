@@ -54,12 +54,7 @@ const agentToggle = document.getElementById('agentToggle');
 const agentPanel = document.getElementById('agentPanel');
 const agentCloseBtn = document.getElementById('agentCloseBtn');
 const agentClearBtn = document.getElementById('agentClearBtn');
-const agentSkillDrop = document.getElementById('agentSkillDrop');
-const agentSkillInput = document.getElementById('agentSkillInput');
-const agentSkillCard = document.getElementById('agentSkillCard');
-const agentSkillName = document.getElementById('agentSkillName');
-const agentSkillSize = document.getElementById('agentSkillSize');
-const agentSkillRemove = document.getElementById('agentSkillRemove');
+
 const agentChatProvider = document.getElementById('agentChatProvider');
 const agentChatModel = document.getElementById('agentChatModel');
 const agentGenProvider = document.getElementById('agentGenProvider');
@@ -16694,15 +16689,18 @@ Rules:
 - "count": integer 1 to 4.
 - "use_last_outputs": true when the request refers to or modifies the most recently generated images (they are shown to you and will be used as reference images).
 - "use_attachments": true when the request refers to or modifies images the user attached.
-- At most 4 generation items.`;
+- At most 4 generation items.
+- If the user's request is vague or missing key info (topic, style, purpose), ask 1-3 clarifying questions in "reply" and return "generations": [].
+- In "reply", feel free to explain your reasoning or offer multiple options when appropriate.
+- When the user asks for multiple ideas/options, present them in "reply" and let the user choose before generating.`;
 let agentOpen = false;
 let agentSending = false;
 let agentThinking = false;
-let agentAttachments = [];
 let agentSaveTimer = null;
 let agentState = null;
+let agentMentionIdx = -1;
 function agentDefaultState(){
-    return {skill:null, messages:[], chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, autoContext:true};
+    return {skills:[], attachments:[], messages:[], chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, autoContext:true, inputHeight:0};
 }
 function agentStorageKey(){ return AGENT_STORAGE_PREFIX + (canvasId || 'default'); }
 // 生图 provider 列表：与主画布的 imageProviders() 不同，这里不排除 modelscope/volcengine，
@@ -16719,6 +16717,15 @@ function loadAgentState(){
             if(data && typeof data === 'object') agentState = {...agentState, ...data, messages:Array.isArray(data.messages) ? data.messages : []};
         }
     } catch(e) { agentState = agentDefaultState(); }
+    // 旧数据迁移：单个 skill 对象 → skills 数组
+    if(agentState.skill && !Array.isArray(agentState.skills)){
+        agentState.skills = [agentState.skill];
+    } else if(agentState.skill && Array.isArray(agentState.skills) && !agentState.skills.length){
+        agentState.skills = [agentState.skill];
+    }
+    delete agentState.skill;
+    if(!Array.isArray(agentState.skills)) agentState.skills = [];
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
     agentState.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
 }
 function saveAgentState(){
@@ -16777,48 +16784,68 @@ function renderAgentModelSelectors(){
     if(agentGenCount) agentGenCount.value = String(agentState.genCount || 1);
     if(agentAutoContext) agentAutoContext.checked = agentState.autoContext !== false;
 }
-function renderAgentSkill(){
-    const skill = agentState?.skill;
-    if(agentSkillDrop) agentSkillDrop.style.display = skill ? 'none' : '';
-    if(agentSkillCard) agentSkillCard.style.display = skill ? '' : 'none';
-    if(skill){
-        if(agentSkillName) agentSkillName.textContent = skill.name || 'skill.md';
-        if(agentSkillSize) agentSkillSize.textContent = `${Math.max(1, Math.round(String(skill.content || '').length / 1024))} KB`;
-    }
-}
+function renderAgentSkill(){ /* Skill 已合并到附件系统，不再需要单独渲染 */ }
 function setAgentSkillFile(file){
     if(!file || !agentState) return;
     if(file.size > AGENT_SKILL_MAX_BYTES){ toast(tr('smart.agentSkillTooBig')); return; }
     const reader = new FileReader();
     reader.onload = () => {
-        agentState.skill = {name:file.name || 'skill.md', content:String(reader.result || '')};
-        renderAgentSkill();
+        if(!Array.isArray(agentState.skills)) agentState.skills = [];
+        agentState.skills.push({name:file.name || 'skill.md', content:String(reader.result || '')});
+        renderAgentAttachments();
         saveAgentState();
         toast(`${tr('smart.agentSkillLoaded')}: ${file.name}`);
     };
     reader.readAsText(file);
 }
 function renderAgentAttachments(){
-    if(!agentAttachRow) return;
-    agentAttachRow.innerHTML = agentAttachments.map((att, i) => `<div class="agent-attach-chip"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`).join('');
+    if(!agentAttachRow || !agentState) return;
+    const skills = Array.isArray(agentState.skills) ? agentState.skills : [];
+    const attachments = Array.isArray(agentState.attachments) ? agentState.attachments : [];
+    let html = '';
+    skills.forEach((skill, i) => {
+        html += `<div class="agent-attach-skill"><i data-lucide="file-text"></i><span class="agent-attach-skill-name">${escapeHtml(skill.name || 'skill.md')}</span><button type="button" data-agent-skill-remove="${i}"><i data-lucide="x"></i></button></div>`;
+    });
+    attachments.forEach((att, i) => {
+        html += `<div class="agent-attach-chip"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
+    });
+    agentAttachRow.innerHTML = html;
     if(window.lucide) lucide.createIcons();
+    agentAttachRow.querySelectorAll('[data-agent-skill-remove]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            agentState.skills.splice(Number(btn.dataset.agentSkillRemove) || 0, 1);
+            renderAgentAttachments();
+            saveAgentState();
+        };
+    });
     agentAttachRow.querySelectorAll('[data-agent-att-remove]').forEach(btn => {
         btn.onclick = e => {
             e.stopPropagation();
-            agentAttachments.splice(Number(btn.dataset.agentAttRemove) || 0, 1);
+            agentState.attachments.splice(Number(btn.dataset.agentAttRemove) || 0, 1);
             renderAgentAttachments();
+            saveAgentState();
         };
     });
 }
 async function agentAttachFiles(files){
-    const list = [...(files || [])].filter(f => String(f.type || '').startsWith('image/')).slice(0, AGENT_LLM_IMAGE_MAX);
-    if(!list.length) return;
+    if(!agentState) return;
+    const allFiles = [...(files || [])];
+    const skillFiles = allFiles.filter(f => {
+        const name = String(f.name || '').toLowerCase();
+        return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt');
+    });
+    const imageFiles = allFiles.filter(f => String(f.type || '').startsWith('image/')).slice(0, AGENT_LLM_IMAGE_MAX);
+    skillFiles.forEach(f => setAgentSkillFile(f));
+    if(!imageFiles.length) return;
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
     try {
-        const uploaded = await uploadFiles(list);
+        const uploaded = await uploadFiles(imageFiles);
         (uploaded || []).filter(f => f?.url).forEach(f => {
-            if(agentAttachments.length < AGENT_LLM_IMAGE_MAX) agentAttachments.push({url:f.url, name:f.name || 'image'});
+            if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX) agentState.attachments.push({url:f.url, name:f.name || 'image'});
         });
         renderAgentAttachments();
+        saveAgentState();
     } catch(e) {
         toast(String(e.message || e).slice(0, 120));
     }
@@ -16865,8 +16892,11 @@ function agentLastUserAttachments(){
 }
 function agentSystemPrompt(){
     const parts = [];
-    const skill = String(agentState?.skill?.content || '').trim();
-    if(skill) parts.push(`Follow this skill document "${agentState.skill.name}" closely:${AGENT_NL}${AGENT_NL}${skill}`);
+    const skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+    skills.forEach(skill => {
+        const text = String(skill?.content || '').trim();
+        if(text) parts.push(`Follow this skill document "${skill.name}" closely:${AGENT_NL}${AGENT_NL}${text}`);
+    });
     parts.push(AGENT_FORMAT_INSTRUCTION);
     return parts.join(AGENT_NL + AGENT_NL);
 }
@@ -16913,7 +16943,7 @@ function parseAgentResponse(raw){
 async function sendAgentMessage(){
     if(agentSending || !agentState) return;
     const text = String(agentInput?.value || '').trim();
-    const attachments = agentAttachments.slice();
+    const attachments = (Array.isArray(agentState.attachments) ? agentState.attachments : []).slice();
     if(!text && !attachments.length) return;
     if(!chatApiProviders().length){ toast(tr('smart.agentNeedChatModel')); return; }
     const provider = resolveChatProviderId(agentState.chatProvider);
@@ -16923,7 +16953,7 @@ async function sendAgentMessage(){
     const userMsg = {id:uid('am'), role:'user', text, images:attachments, ts:Date.now()};
     agentState.messages.push(userMsg);
     agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
-    agentAttachments = [];
+    agentState.attachments = [];
     if(agentInput) agentInput.value = '';
     renderAgentAttachments();
     agentSending = true;
@@ -17033,13 +17063,122 @@ async function runAgentGenerations(assistantMsg, userMsg){
     render();
     scheduleSave();
 }
+function agentCanvasImages(){
+    const items = [];
+    (nodes || []).forEach(node => {
+        if(!isSmartImageNode(node)) return;
+        (node.images || []).forEach(img => {
+            if(img?.url) items.push({url:img.url, name:img.name || node.title || 'image', nodeId:node.id, nodeTitle:node.title || '', ts:Number(node.created_at) || 0});
+        });
+    });
+    return items.sort((a, b) => b.ts - a.ts);
+}
+function showAgentMention(filter){
+    const panel = document.getElementById('agentMentionPanel');
+    if(!panel) return;
+    const images = agentCanvasImages();
+    const q = String(filter || '').toLowerCase();
+    const filtered = q ? images.filter(img => (img.name + ' ' + img.nodeTitle).toLowerCase().includes(q)) : images;
+    if(!filtered.length){
+        panel.innerHTML = '<div class="agent-mention-empty">画布中暂无图片</div>';
+        panel.hidden = false;
+        return;
+    }
+    agentMentionIdx = 0;
+    panel.innerHTML = filtered.slice(0, 20).map((img, i) => {
+        const time = img.ts ? new Date(img.ts).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) : '';
+        return `<button class="agent-mention-item${i === 0 ? ' active' : ''}" type="button" data-mention-url="${escapeHtml(img.url)}" data-mention-name="${escapeHtml(img.name)}"><img src="${escapeHtml(img.url)}" alt="" loading="lazy"><div class="agent-mention-item-info"><div class="agent-mention-item-name">${escapeHtml(img.name)}</div><div class="agent-mention-item-time">${escapeHtml(time)}</div></div></button>`;
+    }).join('');
+    panel.hidden = false;
+    panel.querySelectorAll('.agent-mention-item').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName);
+        };
+    });
+}
+function hideAgentMention(){
+    const panel = document.getElementById('agentMentionPanel');
+    if(panel) panel.hidden = true;
+    agentMentionIdx = -1;
+}
+function insertAgentMention(url, name){
+    if(!agentState || !url) return;
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+    if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX && !agentState.attachments.some(a => a.url === url)){
+        agentState.attachments.push({url, name: name || 'canvas-image'});
+    }
+    if(agentInput){
+        const val = agentInput.value;
+        const atIdx = val.lastIndexOf('@');
+        if(atIdx >= 0) agentInput.value = val.slice(0, atIdx);
+        agentInput.focus();
+    }
+    hideAgentMention();
+    renderAgentAttachments();
+    saveAgentState();
+}
+function agentMentionKeydown(e){
+    const panel = document.getElementById('agentMentionPanel');
+    if(!panel || panel.hidden) return false;
+    const items = panel.querySelectorAll('.agent-mention-item');
+    if(!items.length) return false;
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+        e.preventDefault();
+        agentMentionIdx = e.key === 'ArrowDown' ? Math.min(agentMentionIdx + 1, items.length - 1) : Math.max(agentMentionIdx - 1, 0);
+        items.forEach((el, i) => el.classList.toggle('active', i === agentMentionIdx));
+        items[agentMentionIdx]?.scrollIntoView({block:'nearest'});
+        return true;
+    }
+    if(e.key === 'Enter' && agentMentionIdx >= 0 && items[agentMentionIdx]){
+        e.preventDefault();
+        const btn = items[agentMentionIdx];
+        insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName);
+        return true;
+    }
+    if(e.key === 'Escape'){
+        e.preventDefault();
+        hideAgentMention();
+        return true;
+    }
+    return false;
+}
+function initAgentInputResize(){
+    const handle = document.getElementById('agentInputResize');
+    const textarea = document.getElementById('agentInput');
+    if(!handle || !textarea) return;
+    if(agentState?.inputHeight > 0) textarea.style.height = agentState.inputHeight + 'px';
+    let startY = 0, startH = 0;
+    handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        startY = e.clientY;
+        startH = textarea.offsetHeight;
+        handle.classList.add('dragging');
+        const onMove = ev => {
+            const delta = startY - ev.clientY;
+            const newH = Math.max(60, Math.min(startH + delta, window.innerHeight * 0.4));
+            textarea.style.height = newH + 'px';
+        };
+        const onUp = () => {
+            handle.classList.remove('dragging');
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            if(agentState){
+                agentState.inputHeight = textarea.offsetHeight;
+                saveAgentState();
+            }
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+}
 function initAgentPanel(){
     if(!agentPanel) return;
     loadAgentState();
     renderAgentModelSelectors();
-    renderAgentSkill();
     renderAgentAttachments();
     renderAgentMessages();
+    initAgentInputResize();
     agentToggle?.addEventListener('click', () => toggleAgentPanel());
     agentCloseBtn?.addEventListener('click', () => toggleAgentPanel(false));
     agentClearBtn?.addEventListener('click', () => {
@@ -17047,37 +17186,6 @@ function initAgentPanel(){
         agentState.messages = [];
         renderAgentMessages();
         saveAgentState();
-    });
-    agentSkillDrop?.addEventListener('click', () => agentSkillInput?.click());
-    agentSkillInput?.addEventListener('change', () => {
-        setAgentSkillFile(agentSkillInput.files?.[0]);
-        agentSkillInput.value = '';
-    });
-    agentSkillRemove?.addEventListener('click', e => {
-        e.stopPropagation();
-        agentState.skill = null;
-        renderAgentSkill();
-        saveAgentState();
-    });
-    ['dragenter', 'dragover'].forEach(evt => agentSkillDrop?.addEventListener(evt, e => {
-        e.preventDefault();
-        e.stopPropagation();
-        agentSkillDrop.classList.add('drag-over');
-    }));
-    agentSkillDrop?.addEventListener('dragleave', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        if(!agentSkillDrop.contains(e.relatedTarget)) agentSkillDrop.classList.remove('drag-over');
-    });
-    agentSkillDrop?.addEventListener('drop', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        agentSkillDrop.classList.remove('drag-over');
-        const file = [...(e.dataTransfer?.files || [])].find(f => {
-            const name = String(f.name || '').toLowerCase();
-            return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt');
-        });
-        if(file) setAgentSkillFile(file);
     });
     agentChatProvider?.addEventListener('change', () => {
         agentState.chatProvider = agentChatProvider.value;
@@ -17103,14 +17211,27 @@ function initAgentPanel(){
         agentImageInput.value = '';
     });
     agentSendBtn?.addEventListener('click', () => sendAgentMessage());
+    agentInput?.addEventListener('input', () => {
+        const val = agentInput.value;
+        const cursorPos = agentInput.selectionStart || 0;
+        const beforeCursor = val.slice(0, cursorPos);
+        const atIdx = beforeCursor.lastIndexOf('@');
+        if(atIdx >= 0 && (atIdx === 0 || beforeCursor[atIdx - 1] === ' ' || beforeCursor[atIdx - 1] === '\n')){
+            const filter = beforeCursor.slice(atIdx + 1);
+            if(!filter.includes(' ') && !filter.includes('\n')) showAgentMention(filter);
+            else hideAgentMention();
+        } else hideAgentMention();
+    });
     agentInput?.addEventListener('keydown', e => {
         e.stopPropagation();
+        if(agentMentionKeydown(e)) return;
         if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
             e.preventDefault();
             sendAgentMessage();
         }
     });
     agentInput?.addEventListener('keyup', e => e.stopPropagation());
+    agentInput?.addEventListener('blur', () => setTimeout(hideAgentMention, 200));
     agentInput?.addEventListener('paste', e => {
         e.stopPropagation();
         const files = [...(e.clipboardData?.files || [])].filter(f => String(f.type || '').startsWith('image/'));
@@ -17131,7 +17252,7 @@ function initAgentPanel(){
         e.preventDefault();
         e.stopPropagation();
         agentPanel.classList.remove('drag-over-input');
-        const files = [...(e.dataTransfer?.files || [])].filter(f => String(f.type || '').startsWith('image/'));
+        const files = [...(e.dataTransfer?.files || [])];
         if(files.length) agentAttachFiles(files);
     });
 }

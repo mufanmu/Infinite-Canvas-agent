@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=2026.07.15.1784282603"></script>
     <script src="/static/js/i18n.js?v=2026.07.15.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784283476">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.07.15.1784341297">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -200,21 +200,6 @@
                 <button id="agentClearBtn" class="asset-mini-btn" type="button" data-i18n-title="smart.agentClearChat" title="清空对话"><i data-lucide="eraser"></i></button>
                 <button id="agentCloseBtn" class="asset-mini-btn" type="button" title="收起" data-i18n-title="common.close"><i data-lucide="chevron-right"></i></button>
             </div>
-            <div id="agentSkillZone" class="agent-skill-zone">
-                <div id="agentSkillDrop" class="agent-skill-drop">
-                    <i data-lucide="file-up"></i>
-                    <span data-i18n="smart.agentSkillDrop">拖入 Skill（.md）或点击选择</span>
-                </div>
-                <input id="agentSkillInput" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
-                <div id="agentSkillCard" class="agent-skill-card" style="display:none">
-                    <i data-lucide="file-text"></i>
-                    <div class="agent-skill-meta">
-                        <div id="agentSkillName" class="agent-skill-name"></div>
-                        <div id="agentSkillSize" class="agent-skill-size"></div>
-                    </div>
-                    <button id="agentSkillRemove" class="asset-mini-btn" type="button" data-i18n-title="smart.agentSkillRemove" title="移除 Skill"><i data-lucide="x"></i></button>
-                </div>
-            </div>
             <div class="agent-models">
                 <div class="agent-model-row">
                     <span class="agent-model-label" data-i18n="smart.agentChatModel">理解模型</span>
@@ -260,12 +245,14 @@
             <div class="agent-input-area">
                 <div id="agentAttachRow" class="agent-attach-row"></div>
                 <div class="agent-input-row">
-                    <button id="agentAttachBtn" class="asset-mini-btn" type="button" data-i18n-title="smart.agentAttach" title="添加图片"><i data-lucide="image-plus"></i></button>
-                    <textarea id="agentInput" rows="2" data-i18n-placeholder="smart.agentPlaceholder" placeholder="输入需求，Agent 会结合 Skill 和图片生成新图..."></textarea>
+                    <button id="agentAttachBtn" class="asset-mini-btn" type="button" data-i18n-title="smart.agentAttach" title="添加图片或 Skill"><i data-lucide="paperclip"></i></button>
+                    <textarea id="agentInput" rows="2" data-i18n-placeholder="smart.agentPlaceholder" placeholder="输入需求，@ 引用画布图片..."></textarea>
                     <button id="agentSendBtn" class="agent-send-btn" type="button" data-i18n-title="smart.agentSend" title="发送"><i data-lucide="send"></i></button>
                 </div>
+                <div id="agentMentionPanel" class="agent-mention-panel" hidden></div>
+                <div class="agent-input-resize" id="agentInputResize"></div>
             </div>
-            <input id="agentImageInput" type="file" accept="image/*" multiple hidden>
+            <input id="agentImageInput" type="file" accept="image/*,.md,.markdown,.txt" multiple hidden>
         </aside>
         <div id="assetDialogBackdrop" class="asset-dialog-backdrop" hidden>
             <div class="asset-dialog">
@@ -511,6 +498,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784285849"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.07.15.1784341585"></script>
 </body>
 </html>
