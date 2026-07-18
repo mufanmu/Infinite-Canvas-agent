@@ -16948,17 +16948,14 @@ function renderAgentAttachments(){
                 if(node){
                     selectedId = node.id;
                     selectedIds = [];
-                    // 考虑 Agent 面板宽度（360px），将跳转位置偏左，使图片在可视区域居中
-                    const agentOffset = agentOpen ? 180 : 0;
-                    centerViewportOnWorldPoint({x:(Number(node.x) || 0) - agentOffset, y:Number(node.y) || 0});
+                    agentCenterOnNode(node);
                     render();
                     return;
                 }
             }
             // 没有 nodeId 时用坐标跳转
             if(att.x || att.y){
-                const agentOffset = agentOpen ? 180 : 0;
-                centerViewportOnWorldPoint({x:(Number(att.x) || 0) - agentOffset, y:Number(att.y) || 0});
+                agentCenterOnPoint(Number(att.x) || 0, Number(att.y) || 0);
             }
         };
     });
@@ -17019,11 +17016,20 @@ function renderAgentMessages(){
         };
     });
     agentMessages.querySelectorAll('[data-agent-retry]').forEach(btn => {
+        btn.disabled = agentSending;
         btn.onclick = e => {
             e.stopPropagation();
-            agentRetryMessage(btn.dataset.agentRetry);
+            if(!agentSending) agentRetryMessage(btn.dataset.agentRetry);
         };
     });
+    // 运行过程中锁定输入框和顶部按钮
+    if(agentInput) agentInput.disabled = agentSending;
+    const newChatBtn = document.getElementById('agentNewChatBtn');
+    const chatListBtn = document.getElementById('agentChatListBtn');
+    const moreBtn = document.getElementById('agentMoreBtn');
+    if(newChatBtn) newChatBtn.disabled = agentSending;
+    if(chatListBtn) chatListBtn.disabled = agentSending;
+    if(moreBtn) moreBtn.disabled = agentSending;
 }
 function agentLastResults(){
     const msgs = agentState?.messages || [];
@@ -17271,6 +17277,40 @@ async function sendAgentMessage(){
         renderAgentMessages();
     }
 }
+function agentCenterOnPoint(x, y){
+    // 考虑 Agent 面板宽度，使用可视区域中心
+    const agentPanelWidth = agentOpen ? 382 : 0;
+    const visibleCenterX = (shell.clientWidth - agentPanelWidth) / 2;
+    viewport.x = visibleCenterX - x * viewport.scale;
+    viewport.y = shell.clientHeight / 2 - y * viewport.scale;
+    applyViewport();
+    scheduleSave();
+}
+function agentCenterOnNode(node){
+    if(!node) return;
+    const rect = nodeRect(node);
+    agentCenterOnPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+}
+function agentFindEmptyPosition(count=1){
+    // A+C 方案：计算空白区域 + 右侧追加
+    // 找到画布上所有图片节点的边界
+    const imageNodes = (nodes || []).filter(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url));
+    const center = viewportCenter();
+    if(!imageNodes.length) return {x:center.x, y:center.y};
+    // 找到最右边的节点
+    let maxX = -Infinity;
+    let maxXNode = null;
+    imageNodes.forEach(n => {
+        const rect = nodeRect(n);
+        const right = rect.x + rect.width;
+        if(right > maxX){ maxX = right; maxXNode = n; }
+    });
+    if(!maxXNode) return {x:center.x, y:center.y};
+    // 在最右边节点的右侧放置新图，垂直方向与最右边节点对齐
+    const rect = nodeRect(maxXNode);
+    const gap = 60;
+    return {x:rect.x + rect.width + gap + 130, y:rect.y + rect.height / 2};
+}
 async function runAgentGenerations(assistantMsg, userMsg){
     const gens = assistantMsg.generations || [];
     if(!gens.length) return;
@@ -17313,11 +17353,9 @@ async function runAgentGenerations(assistantMsg, userMsg){
             gen.results = urls;
             gen.status = 'done';
             if(urls.length){
-                const center = viewportCenter();
                 undoSuppressed = true;
-                const node = createImageNodeAt({x:center.x + offset, y:center.y + offset}, urls.map(u => ({...u})));
+                const node = createImageNodeAt(agentFindEmptyPosition(urls.length), urls.map(u => ({...u})));
                 undoSuppressed = false;
-                offset += 48;
                 if(node) selectedId = node.id;
             }
         } catch(e) {
@@ -17458,11 +17496,29 @@ function initAgentPanel(){
     }
     function showDropdown(btn, panel){
         if(!btn || !panel) return;
+        // 把面板移到 document.body 中，避免被 Agent 面板的 backdrop-filter 遮挡
+        if(panel.parentElement !== document.body) document.body.appendChild(panel);
         const rect = btn.getBoundingClientRect();
-        panel.style.left = Math.max(8, rect.left) + 'px';
-        panel.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
-        panel.style.top = 'auto';
+        // 先显示面板以测量尺寸
+        panel.style.visibility = 'hidden';
+        panel.hidden = false;
+        const panelHeight = panel.offsetHeight;
+        const panelWidth = panel.offsetWidth;
+        panel.style.visibility = '';
+        // 水平位置：确保面板不会超出屏幕右边界
+        const maxLeft = window.innerWidth - panelWidth - 8;
+        panel.style.left = Math.min(Math.max(8, rect.left), Math.max(8, maxLeft)) + 'px';
         panel.style.right = 'auto';
+        // 垂直位置：优先在按钮上方显示，如果空间不够则在下方显示
+        const spaceAbove = rect.top;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        if(spaceAbove >= panelHeight + 8 || spaceAbove >= spaceBelow){
+            panel.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+            panel.style.top = 'auto';
+        } else {
+            panel.style.top = (rect.bottom + 6) + 'px';
+            panel.style.bottom = 'auto';
+        }
         panel.hidden = false;
     }
     modelBtn?.addEventListener('click', e => {
