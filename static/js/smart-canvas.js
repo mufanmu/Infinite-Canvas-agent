@@ -17359,7 +17359,7 @@ function agentCenterOnNode(node){
     agentCenterOnPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
 }
 function agentFindEmptyPosition(count=1){
-    // A+C 方案：计算空白区域 + 右侧追加（水平排列）
+    // A+C 方案：计算空白区域 + 右侧追加（水平排列，顶部对齐）
     const imageNodes = (nodes || []).filter(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url));
     const center = viewportCenter();
     if(!imageNodes.length) return {x:center.x, y:center.y};
@@ -17372,10 +17372,10 @@ function agentFindEmptyPosition(count=1){
         if(right > maxX){ maxX = right; maxXNode = n; }
     });
     if(!maxXNode) return {x:center.x, y:center.y};
-    // 在最右边节点的右侧水平放置新图，垂直方向与最右边节点对齐
+    // 在最右边节点的右侧水平放置新图，顶部对齐，有一点间距
     const rect = nodeRect(maxXNode);
     const gap = 40;
-    return {x:rect.x + rect.width + gap + 130, y:rect.y + rect.height / 2};
+    return {x:rect.x + rect.width + gap + 130, y:rect.y};
 }
 async function runAgentGenerations(assistantMsg, userMsg){
     const gens = assistantMsg.generations || [];
