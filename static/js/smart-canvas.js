@@ -50,6 +50,23 @@ const assetDialogInput = document.getElementById('assetDialogInput');
 const assetDialogCancel = document.getElementById('assetDialogCancel');
 const assetDialogOk = document.getElementById('assetDialogOk');
 const assetHoverPreview = document.getElementById('assetHoverPreview');
+const agentToggle = document.getElementById('agentToggle');
+const agentPanel = document.getElementById('agentPanel');
+const agentCloseBtn = document.getElementById('agentCloseBtn');
+
+const agentChatProvider = document.getElementById('agentChatProvider');
+const agentChatModel = document.getElementById('agentChatModel');
+const agentGenProvider = document.getElementById('agentGenProvider');
+const agentGenModel = document.getElementById('agentGenModel');
+const agentGenRatio = document.getElementById('agentGenRatio');
+const agentGenResolution = document.getElementById('agentGenResolution');
+const agentGenCount = document.getElementById('agentGenCount');
+const agentMessages = document.getElementById('agentMessages');
+const agentAttachRow = document.getElementById('agentAttachRow');
+const agentAttachBtn = document.getElementById('agentAttachBtn');
+const agentImageInput = document.getElementById('agentImageInput');
+const agentInput = document.getElementById('agentInput');
+const agentSendBtn = document.getElementById('agentSendBtn');
 const promptPresetPanel = document.getElementById('promptPresetPanel');
 const promptPresetClose = document.getElementById('promptPresetClose');
 const promptPresetStatus = document.getElementById('promptPresetStatus');
@@ -5290,6 +5307,7 @@ function setAssetLibraryFromResponse(data, options={}){
 function toggleAssetLibrary(open=!assetLibraryOpen){
     if(!assetPanel || !assetToggle) return;
     assetLibraryOpen = !!open;
+    if(assetLibraryOpen) toggleAgentPanel(false);
     assetPanel.classList.toggle('open', assetLibraryOpen);
     assetToggle?.classList.toggle('active', assetLibraryOpen);
     if(assetLibraryOpen) loadAssetLibrary();
@@ -7240,6 +7258,7 @@ function smartNodeToolbarHtml(node){
     const imageCount = images.filter(img => mediaKindForItem(imageForDisplay(img)) === 'image' && imageForDisplay(img)?.url).length;
     const gridLabel = imageCount > 1 ? '宫格拼接' : '宫格切分';
     const actions = [
+        {key:'sendToAgent', icon:'bot', label:'发送至Agent', enabled:true},
         {key:'preview', icon:'eye', label:'预览', enabled:kind === 'image' || kind === 'video'},
         {key:'crop', icon:'crop', label:'裁剪', enabled:canEditImage},
         {key:'outpaint', icon:'expand', label:'扩图', enabled:canEditImage},
@@ -7278,6 +7297,22 @@ function runSmartNodeToolbarAction(nodeId, action){
     selectedId = nodeId;
     selectedIds = [];
     selectedImage = {nodeId, index};
+    if(action === 'sendToAgent'){
+        // 发送图片到 Agent 面板作为附件
+        if(!agentOpen) toggleAgentPanel(true);
+        if(agentState){
+            if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+            if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX && !agentState.attachments.some(a => a.url === item.url)){
+                agentState.attachments.push({url:item.url, name:item.name || node.title || 'image', nodeId:node.id, x:Number(node.x) || 0, y:Number(node.y) || 0});
+                renderAgentAttachments();
+                saveAgentState();
+                toast('已发送至 Agent');
+            } else {
+                toast('附件已存在或已达上限');
+            }
+        }
+        return;
+    }
     if(action === 'download'){
         downloadPreviewFile(node.images?.[index] || item);
         return;
@@ -8016,7 +8051,7 @@ function handlePortDrop(drag, e){
         return;
     }
     if(!drag.moved){ discardPendingUndo(); render(); return; }
-    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
+    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
         discardPendingUndo(); render(); return;
     }
     const p = screenToWorld(e);
@@ -15554,14 +15589,14 @@ function createNodeFromMenu(type){
 shell.addEventListener('mousedown', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
 }, true);
 shell.addEventListener('click', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
     const nodeEl = e.target.closest('.image-node');
@@ -15569,8 +15604,8 @@ shell.addEventListener('click', e => {
     else exitZoomPreview(screenToWorld(e));
 }, true);
 shell.onmousedown = e => {
-    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
-    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
+    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
     closeCreateMenu();
     if(e.button === 0 && e.shiftKey){
         e.preventDefault();
@@ -15607,7 +15642,7 @@ shell.oncontextmenu = e => {
         e.stopPropagation();
         return;
     }
-    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -15623,14 +15658,14 @@ shell.oncontextmenu = e => {
     openCreateMenu(e);
 };
 shell.ondblclick = e => {
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     openCreateMenu(e);
 };
 shell.onclick = e => {
     if(selectionJustFinished) return;
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     closeCreateMenu();
     clearSelection();
@@ -16110,7 +16145,7 @@ window.onmouseup = e => {
     }
 };
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
+    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
     e.preventDefault();
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -16649,6 +16684,1117 @@ assetDropZone?.addEventListener('drop', handleAssetPanelDrop);
 assetPanel?.addEventListener('dragover', handleAssetPanelDragOver);
 assetPanel?.addEventListener('dragleave', e => { if(!assetPanel?.contains(e.relatedTarget)) setAssetDragOver(false); });
 assetPanel?.addEventListener('drop', handleAssetPanelDrop);
+// ==================== AI Agent 侧边面板 ====================
+const AGENT_STORAGE_PREFIX = 'smart_agent_v1:';
+const AGENT_SKILL_MAX_BYTES = 512 * 1024;
+const AGENT_HISTORY_MAX = 20;
+const AGENT_LLM_IMAGE_MAX = 8;
+const AGENT_GEN_MAX_PER_MSG = 8;
+const AGENT_MSG_MAX = 60;
+const AGENT_NL = String.fromCharCode(10);
+const AGENT_FORMAT_INSTRUCTION = `You are an AI image-generation agent inside an infinite-canvas app. If a skill document is provided above, follow its style and rules closely.
+
+You MUST reply with a raw JSON object only. No markdown fences, no explanation, no extra text:
+{"reply":"your conversational reply","options":[{"label":"确认","value":"确认"},{"label":"修改","value":"修改"}],"prompts":["detailed image prompt in English"],"generations":[{"prompt":"detailed image prompt in English","count":1,"use_last_outputs":false,"use_attachments":false}]}
+
+Rules:
+- "reply": text shown to the user, written in the user's language.
+- "options": optional array of action buttons shown below your reply. Use when you ask the user to confirm, choose, or decide. Each option has "label" (button text) and "value" (text sent when clicked). Omit or use [] when no options are needed.
+- "prompts": optional array of prompt strings when you propose a plan but wait for user confirmation. Use this when you ask the user to confirm before generating. Each prompt is a detailed, self-contained image prompt in English.
+- "generations": images to generate right away. Use [] when no image is needed (questions, chat, prompt discussion) or when waiting for user confirmation (use "prompts" instead).
+- "prompt": detailed, self-contained image prompt written in English unless the skill says otherwise.
+- "count": integer 1 to 8.
+- "use_last_outputs": true when the request refers to or modifies the most recently generated images (they are shown to you and will be used as reference images).
+- "use_attachments": true when the request refers to or modifies images the user attached.
+- At most 8 generation items.
+- If the user's request is vague or missing key info (topic, style, purpose), ask 1-3 clarifying questions in "reply" and return "generations": [].
+- In "reply", feel free to explain your reasoning or offer multiple options when appropriate.
+- When the user asks for multiple ideas/options, present them in "reply" and let the user choose before generating.
+- When the user clicks "重新生成提示词" (regenerate prompt), they want you to revise the prompt based on their feedback and ask for confirmation again. Return "generations": [] and do not generate images yet, wait for the user to confirm.
+- When the user asks for N images with different content (e.g., "生成4张步骤图"), return N different prompts in the "generations" array, one for each image. Do not return a single prompt with count=N unless the user explicitly asks for N identical images.
+- When the user uploads a character reference image, remember the character's appearance (hair, clothing, accessories) and maintain consistency in all subsequent generations. Describe the character in detail in each prompt.
+- When a skill document is provided, follow its style rules strictly in all generations. Maintain the same style (line art, colors, annotations, composition) across all images in a conversation.
+- When the user refers to a previous image (e.g., "把背景换成蓝色", "修改这张"), use "use_last_outputs": true to reference the most recently generated images. If the user refers to an older image, ask which one they mean.
+- When generating multiple images, ensure each prompt is sufficiently different (different angles, scenes, actions, compositions). Avoid repetitive or similar prompts.
+- Write detailed, self-contained prompts that include lighting, composition, colors, details, and atmosphere. The more specific the prompt, the better the image quality.
+- When the user provides feedback on a generated image (e.g., "太暗了", "背景太复杂了"), revise the prompt based on the feedback and ask for confirmation again.
+- When the user asks to combine multiple images (e.g., "把这两张图拼在一起", "做一个对比图"), describe the layout and composition in the prompt.
+- When the user specifies image parameters (e.g., "16:9", "高清", "4K"), include these requirements in the prompt. The system will use the user's selected parameters for generation.
+- When the user asks to convert an image to a different style (e.g., "把这张照片转成小黑风格"), describe the target style in detail in the prompt.
+- When the user asks about an image's content (e.g., "这张图里有什么", "描述一下这张图"), analyze the image and provide a detailed description.`;
+let agentOpen = false;
+let agentSending = false;
+let agentThinking = false;
+let agentSaveTimer = null;
+let agentState = null;
+let agentMentionIdx = -1;
+function agentDefaultState(){
+    return {skills:[], attachments:[], messages:[], conversations:[], activeConversationId:'', chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, genQuality:'', autoContext:true, inputHeight:0};
+}
+function agentStorageKey(){ return AGENT_STORAGE_PREFIX + (canvasId || 'default'); }
+// 生图 provider 列表：与主画布的 imageProviders() 不同，这里不排除 modelscope/volcengine，
+// 因为后端 /api/canvas-image-tasks 统一支持它们（主画布排除它们仅因专用引擎 UI）。
+function agentGenProviders(){
+    return (apiProviders || []).filter(p => p.enabled !== false && (p.image_models || []).length);
+}
+function loadAgentState(){
+    agentState = agentDefaultState();
+    try {
+        const raw = localStorage.getItem(agentStorageKey());
+        if(raw){
+            const data = JSON.parse(raw);
+            if(data && typeof data === 'object') agentState = {...agentState, ...data, messages:Array.isArray(data.messages) ? data.messages : []};
+        }
+    } catch(e) { agentState = agentDefaultState(); }
+    // 旧数据迁移：单个 skill 对象 → skills 数组
+    if(agentState.skill && !Array.isArray(agentState.skills)){
+        agentState.skills = [agentState.skill];
+    } else if(agentState.skill && Array.isArray(agentState.skills) && !agentState.skills.length){
+        agentState.skills = [agentState.skill];
+    }
+    delete agentState.skill;
+    if(!Array.isArray(agentState.skills)) agentState.skills = [];
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+    // 旧数据迁移：messages → conversations
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    if(agentState.messages && agentState.messages.length && !agentState.conversations.length){
+        const firstMsg = agentState.messages[0];
+        const title = firstMsg?.text ? String(firstMsg.text).slice(0, 30) : '对话';
+        agentState.conversations = [{id:uid('ac'), title, messages:agentState.messages, ts:Date.now()}];
+        agentState.activeConversationId = agentState.conversations[0].id;
+    }
+    if(!agentState.activeConversationId && agentState.conversations.length){
+        agentState.activeConversationId = agentState.conversations[0].id;
+    }
+    // 加载当前对话的 messages
+    const activeConv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+    agentState.messages = activeConv ? (activeConv.messages || []).slice(-AGENT_MSG_MAX) : [];
+}
+function saveAgentState(){
+    clearTimeout(agentSaveTimer);
+    agentSaveTimer = setTimeout(() => {
+        try {
+            // 同步当前 messages 到 conversations
+            if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+                const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+                if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+            }
+            const data = {...agentState, messages:(agentState.messages || []).slice(-AGENT_MSG_MAX)};
+            localStorage.setItem(agentStorageKey(), JSON.stringify(data));
+        } catch(e) { /* localStorage 写满时静默忽略 */ }
+    }, 200);
+}
+function toggleAgentPanel(open=!agentOpen){
+    if(!agentPanel || !agentToggle) return;
+    agentOpen = !!open;
+    if(agentOpen) toggleAssetLibrary(false);
+    agentPanel.classList.toggle('open', agentOpen);
+    agentToggle.classList.toggle('active', agentOpen);
+    if(agentOpen){
+        renderAgentModelSelectors();
+        renderAgentMessages();
+    }
+}
+function chatRequestedImageCount(text){
+    const t = String(text || '');
+    const m = t.match(/(?<!\d)([1-4])\s*(?:张|幅|个|组|套)(?!\d)/);
+    if(m) return parseInt(m[1], 10);
+    const cnMap = {一:1, 二:2, 两:2, 俩:2, 三:3, 四:4};
+    for(const [k, v] of Object.entries(cnMap)){
+        if(t.includes(k + '张') || t.includes(k + '幅')) return v;
+    }
+    return 0;
+}
+function agentRatioLabel(key){
+    const map = {square:'1:1', portrait:'2:3', portrait43:'3:4', landscape43:'4:3', landscape:'3:2', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21'};
+    return map[key] || key || '1:1';
+}
+function agentQualityLabel(q){
+    const map = {'':'自动', high:'高', medium:'中', low:'低'};
+    return map[q] || '自动';
+}
+function agentUpdateToolbarLabels(){
+    const modelLabel = document.getElementById('agentModelLabel');
+    const paramsLabel = document.getElementById('agentParamsLabel');
+    if(modelLabel && agentState){
+        const genProviders = agentGenProviders();
+        const provider = genProviders.find(p => p.id === agentState.genProvider);
+        modelLabel.textContent = provider ? (provider.name || provider.id) : '模型';
+    }
+    if(paramsLabel && agentState){
+        const ratio = agentRatioLabel(agentState.genRatio || 'square');
+        const res = (agentState.genResolution || '1k').toUpperCase();
+        const count = agentState.genCount || 1;
+        const quality = agentState.genQuality || '';
+        const qLabel = quality ? ` · ${agentQualityLabel(quality)}` : '';
+        paramsLabel.textContent = `${ratio} · ${res} · ${count}张${qLabel}`;
+    }
+}
+function agentMoveSelectsToDropdown(){
+    const chatSelects = document.getElementById('agentChatSelects');
+    const genSelects = document.getElementById('agentGenSelects');
+    if(chatSelects && agentChatProvider && agentChatModel){
+        chatSelects.appendChild(agentChatProvider);
+        chatSelects.appendChild(agentChatModel);
+    }
+    if(genSelects && agentGenProvider && agentGenModel){
+        genSelects.appendChild(agentGenProvider);
+        genSelects.appendChild(agentGenModel);
+    }
+    // 确保下拉面板初始隐藏
+    const modelPanel = document.getElementById('agentModelPanel');
+    const paramsPanel = document.getElementById('agentParamsPanel');
+    if(modelPanel) modelPanel.hidden = true;
+    if(paramsPanel) paramsPanel.hidden = true;
+}
+function renderAgentModelSelectors(){
+    if(!agentState) return;
+    const chatProviders = chatApiProviders();
+    if(agentChatProvider){
+        agentState.chatProvider = chatProviders.length ? resolveChatProviderId(agentState.chatProvider) : '';
+        agentChatProvider.innerHTML = chatProviders.length ? chatProviderOptions(agentState.chatProvider) : `<option value="">${escapeHtml(tr('smart.agentNoProviders'))}</option>`;
+    }
+    if(agentChatModel){
+        agentState.chatModel = chatProviders.length ? resolveChatModel(agentState.chatModel, agentState.chatProvider) : '';
+        agentChatModel.innerHTML = chatProviders.length ? chatModelOptions(agentState.chatModel, agentState.chatProvider) : '<option value="">-</option>';
+    }
+    const genProviders = agentGenProviders();
+    if(agentGenProvider){
+        if(genProviders.length){
+            if(!genProviders.some(p => p.id === agentState.genProvider)) agentState.genProvider = genProviders[0].id;
+            agentGenProvider.innerHTML = genProviders.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === agentState.genProvider ? 'selected' : ''}>${escapeHtml(p.name || p.id)}</option>`).join('');
+        } else {
+            agentState.genProvider = '';
+            agentGenProvider.innerHTML = `<option value="">${escapeHtml(tr('smart.agentNoProviders'))}</option>`;
+        }
+    }
+    if(agentGenModel){
+        const models = agentState.genProvider ? providerImageModels(agentState.genProvider) : [];
+        if(models.length){
+            if(!models.includes(agentState.genModel)) agentState.genModel = models[0];
+            agentGenModel.innerHTML = models.map(m => `<option value="${escapeHtml(m)}" ${m === agentState.genModel ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+        } else {
+            agentState.genModel = '';
+            agentGenModel.innerHTML = '<option value="">-</option>';
+        }
+    }
+    agentSyncParamsPanel();
+    agentUpdateToolbarLabels();
+}
+function agentSyncParamsPanel(){
+    if(!agentState) return;
+    const ratio = agentState.genRatio || 'square';
+    const res = agentState.genResolution || '1k';
+    const count = agentState.genCount || 1;
+    const quality = agentState.genQuality || '';
+    // 同步比例网格
+    document.querySelectorAll('.agent-ratio-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.ratio === ratio);
+    });
+    // 同步分辨率网格
+    document.querySelectorAll('.agent-res-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.res === res);
+    });
+    // 同步数量网格
+    document.querySelectorAll('.agent-count-btn').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.count) === count);
+    });
+    // 同步质量
+    document.querySelectorAll('.agent-quality-btn').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.quality || '') === quality);
+    });
+    // 同步隐藏 select（保持后端兼容）
+    if(agentGenRatio) agentGenRatio.value = ratio;
+    if(agentGenResolution) agentGenResolution.value = res;
+    if(agentGenCount) agentGenCount.value = String(count);
+}
+function renderAgentSkill(){ /* Skill 已合并到附件系统，不再需要单独渲染 */ }
+function setAgentSkillFile(file){
+    if(!file || !agentState) return;
+    if(file.size > AGENT_SKILL_MAX_BYTES){ toast(tr('smart.agentSkillTooBig')); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+        if(!Array.isArray(agentState.skills)) agentState.skills = [];
+        agentState.skills.push({name:file.name || 'skill.md', content:String(reader.result || '')});
+        renderAgentAttachments();
+        saveAgentState();
+        toast(`${tr('smart.agentSkillLoaded')}: ${file.name}`);
+    };
+    reader.readAsText(file);
+}
+function renderAgentAttachments(){
+    if(!agentAttachRow || !agentState) return;
+    const skills = Array.isArray(agentState.skills) ? agentState.skills : [];
+    const attachments = Array.isArray(agentState.attachments) ? agentState.attachments : [];
+    let html = '';
+    skills.forEach((skill, i) => {
+        html += `<div class="agent-attach-skill"><i data-lucide="file-text"></i><span class="agent-attach-skill-name">${escapeHtml(skill.name || 'skill.md')}</span><button type="button" data-agent-skill-remove="${i}"><i data-lucide="x"></i></button></div>`;
+    });
+    attachments.forEach((att, i) => {
+        html += `<div class="agent-attach-chip" data-agent-att-jump="${i}" title="${escapeHtml(att.name || 'image')}"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
+    });
+    agentAttachRow.innerHTML = html;
+    if(window.lucide) lucide.createIcons();
+    agentAttachRow.querySelectorAll('[data-agent-skill-remove]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            agentState.skills.splice(Number(btn.dataset.agentSkillRemove) || 0, 1);
+            renderAgentAttachments();
+            saveAgentState();
+        };
+    });
+    agentAttachRow.querySelectorAll('[data-agent-att-remove]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            agentState.attachments.splice(Number(btn.dataset.agentAttRemove) || 0, 1);
+            renderAgentAttachments();
+            saveAgentState();
+        };
+    });
+    agentAttachRow.querySelectorAll('[data-agent-att-jump]').forEach(el => {
+        el.onclick = e => {
+            if(e.target.closest('[data-agent-att-remove]')) return;
+            const att = agentState.attachments[Number(el.dataset.agentAttJump)];
+            if(!att) return;
+            // 跳转到画布中图片位置
+            if(att.nodeId){
+                const node = (nodes || []).find(n => n.id === att.nodeId);
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    agentCenterOnNode(node);
+                    render();
+                    return;
+                }
+            }
+            // 没有 nodeId 时用坐标跳转
+            if(att.x || att.y){
+                agentCenterOnPoint(Number(att.x) || 0, Number(att.y) || 0);
+            }
+        };
+    });
+}
+async function agentAttachFiles(files){
+    if(!agentState) return;
+    const allFiles = [...(files || [])];
+    const skillFiles = allFiles.filter(f => {
+        const name = String(f.name || '').toLowerCase();
+        return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt');
+    });
+    const imageFiles = allFiles.filter(f => String(f.type || '').startsWith('image/')).slice(0, AGENT_LLM_IMAGE_MAX);
+    skillFiles.forEach(f => setAgentSkillFile(f));
+    if(!imageFiles.length) return;
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+    try {
+        const uploaded = await uploadFiles(imageFiles);
+        (uploaded || []).filter(f => f?.url).forEach(f => {
+            if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX) agentState.attachments.push({url:f.url, name:f.name || 'image'});
+        });
+        renderAgentAttachments();
+        saveAgentState();
+    } catch(e) {
+        toast(String(e.message || e).slice(0, 120));
+    }
+}
+function agentGenCardHtml(gen){
+    const status = gen.status || 'running';
+    const statusText = status === 'done' ? tr('smart.agentGenDone') : status === 'error' ? tr('smart.agentGenFail') : tr('smart.agentGenerating');
+    const refTags = [gen.use_last_outputs ? tr('smart.agentRefLast') : '', gen.use_attachments ? tr('smart.agentRefAttach') : ''].filter(Boolean).join(' · ');
+    const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer">`).join('');
+    return `<div class="agent-gen-card"><div class="agent-gen-prompt">${escapeHtml(gen.prompt || '')}</div><div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${refTags ? ' · ' + escapeHtml(refTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
+}
+function agentMessageHtml(msg){
+    const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
+    const gens = (msg.generations || []).map(agentGenCardHtml).join('');
+    const actions = msg.text ? `<div class="agent-msg-actions"><button class="agent-msg-action-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}" title="复制"><i data-lucide="copy"></i></button>${msg.role === 'assistant' ? `<button class="agent-msg-action-btn" type="button" data-agent-retry="${escapeHtml(msg.id)}" title="重试"><i data-lucide="refresh-cw"></i></button>` : ''}</div>` : '';
+    // 结构化 options 字段（仅 assistant 消息，且 generations 为空时显示）
+    const hasGenerations = Array.isArray(msg.generations) && msg.generations.length > 0;
+    const options = (!hasGenerations && Array.isArray(msg.options)) ? msg.options : [];
+    const optionsHtml = options.length ? `<div class="agent-msg-options">${options.map(opt => `<button class="agent-msg-option-btn" type="button" data-agent-option="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</button>`).join('')}</div>` : '';
+    return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${optionsHtml}${actions}</div>`;
+}
+function renderAgentMessages(){
+    if(!agentMessages || !agentState) return;
+    const msgs = agentState.messages || [];
+    if(!msgs.length && !agentThinking){
+        agentMessages.innerHTML = `<div class="agent-empty"><i data-lucide="bot"></i>${escapeHtml(tr('smart.agentEmpty'))}</div>`;
+    } else {
+        const thinking = agentThinking ? `<div class="agent-msg assistant"><div class="agent-msg-bubble"><span class="agent-gen-spinner" style="display:inline-block;vertical-align:-2px;margin-right:6px"></span>${escapeHtml(tr('smart.agentThinking'))}</div></div>` : '';
+        agentMessages.innerHTML = msgs.map(agentMessageHtml).join('') + thinking;
+    }
+    if(window.lucide) lucide.createIcons();
+    agentMessages.scrollTop = agentMessages.scrollHeight;
+    if(agentSendBtn) agentSendBtn.disabled = agentSending;
+    // 绑定消息操作按钮
+    agentMessages.querySelectorAll('[data-agent-copy]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const msg = (agentState?.messages || []).find(m => m.id === btn.dataset.agentCopy);
+            if(msg?.text) agentCopyMessage(msg.text);
+        };
+    });
+    agentMessages.querySelectorAll('[data-agent-retry]').forEach(btn => {
+        btn.disabled = agentSending;
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(!agentSending) agentRetryMessage(btn.dataset.agentRetry);
+        };
+    });
+    // 运行过程中锁定输入框和顶部按钮
+    if(agentInput) agentInput.disabled = agentSending;
+    const newChatBtn = document.getElementById('agentNewChatBtn');
+    const chatListBtn = document.getElementById('agentChatListBtn');
+    const moreBtn = document.getElementById('agentMoreBtn');
+    if(newChatBtn) newChatBtn.disabled = agentSending;
+    if(chatListBtn) chatListBtn.disabled = agentSending;
+    if(moreBtn) moreBtn.disabled = agentSending;
+    // 绑定选项按钮事件
+    agentMessages.querySelectorAll('[data-agent-option]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const value = btn.dataset.agentOption;
+            if(value === '确认'){
+                // 使用 prompts 构建 generations 并开始生成
+                const lastAssistantMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant' && (m.prompts?.length || m.generations?.length));
+                if(lastAssistantMsg){
+                    const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+                    // 如果有 prompts 但没有 generations，使用 prompts 构建 generations
+                    if(lastAssistantMsg.prompts?.length && !lastAssistantMsg.generations?.length){
+                        lastAssistantMsg.generations = lastAssistantMsg.prompts.map(prompt => ({
+                            prompt,
+                            count: 1,
+                            use_last_outputs: false,
+                            use_attachments: false,
+                            results: [],
+                            status: 'running'
+                        }));
+                    }
+                    if(lastAssistantMsg.generations?.length){
+                        runAgentGenerations(lastAssistantMsg, lastUserMsg);
+                    }
+                }
+            } else {
+                // 发送文本给 LLM（重新生成提示词）
+                if(agentInput){
+                    agentInput.value = value;
+                    agentInput.focus();
+                }
+                sendAgentMessage();
+            }
+        };
+    });
+    // 绑定生成图片点击跳转事件
+    agentMessages.querySelectorAll('[data-agent-gen-jump]').forEach(img => {
+        img.onclick = e => {
+            e.stopPropagation();
+            const nodeId = img.dataset.agentGenJump;
+            const x = Number(img.dataset.agentGenX) || 0;
+            const y = Number(img.dataset.agentGenY) || 0;
+            const url = img.src || '';
+            // 优先通过 nodeId 查找
+            if(nodeId){
+                const node = (nodes || []).find(n => n.id === nodeId);
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    agentCenterOnNode(node);
+                    render();
+                    return;
+                }
+            }
+            // 没有 nodeId 时通过 url 查找节点
+            if(url){
+                const node = (nodes || []).find(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url && url.includes(img.url)));
+                if(node){
+                    selectedId = node.id;
+                    selectedIds = [];
+                    agentCenterOnNode(node);
+                    render();
+                    return;
+                }
+            }
+            // 最后通过坐标跳转
+            if(x || y) agentCenterOnPoint(x, y);
+        };
+    });
+}
+function agentLastResults(){
+    const msgs = agentState?.messages || [];
+    for(let i = msgs.length - 1; i >= 0; i--){
+        const results = (msgs[i].generations || []).flatMap(g => (g.results || []).filter(r => r?.url));
+        if(results.length) return results;
+    }
+    return [];
+}
+function agentLastUserAttachments(){
+    const msgs = agentState?.messages || [];
+    for(let i = msgs.length - 1; i >= 0; i--){
+        if(msgs[i].role === 'user' && (msgs[i].images || []).some(img => img?.url)) return msgs[i].images.filter(img => img?.url);
+    }
+    return [];
+}
+function agentNewChat(){
+    if(!agentState) return;
+    // 保存当前对话
+    if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+        const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+        if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+    }
+    // 创建新对话
+    const newConv = {id:uid('ac'), title:'新对话', messages:[], ts:Date.now()};
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    agentState.conversations.unshift(newConv);
+    agentState.activeConversationId = newConv.id;
+    agentState.messages = [];
+    renderAgentMessages();
+    saveAgentState();
+}
+function agentDeleteChat(){
+    if(!agentState || !agentState.activeConversationId) return;
+    if(!Array.isArray(agentState.conversations)) agentState.conversations = [];
+    agentState.conversations = agentState.conversations.filter(c => c.id !== agentState.activeConversationId);
+    if(agentState.conversations.length){
+        agentState.activeConversationId = agentState.conversations[0].id;
+        agentState.messages = (agentState.conversations[0].messages || []).slice(-AGENT_MSG_MAX);
+    } else {
+        agentState.activeConversationId = '';
+        agentState.messages = [];
+    }
+    renderAgentMessages();
+    renderAgentChatList();
+    saveAgentState();
+}
+function agentSwitchChat(id){
+    if(!agentState || !id || id === agentState.activeConversationId) return;
+    // 保存当前对话
+    if(agentState.activeConversationId && Array.isArray(agentState.conversations)){
+        const conv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
+        if(conv) conv.messages = (agentState.messages || []).slice(-AGENT_MSG_MAX);
+    }
+    // 切换
+    const target = agentState.conversations.find(c => c.id === id);
+    if(!target) return;
+    agentState.activeConversationId = id;
+    agentState.messages = (target.messages || []).slice(-AGENT_MSG_MAX);
+    renderAgentMessages();
+    renderAgentChatList();
+    saveAgentState();
+}
+function renderAgentChatList(){
+    const panel = document.getElementById('agentChatListPanel');
+    if(!panel || !agentState) return;
+    const convs = Array.isArray(agentState.conversations) ? agentState.conversations : [];
+    if(!convs.length){
+        panel.innerHTML = '<div class="agent-chat-empty">暂无对话</div>';
+        return;
+    }
+    panel.innerHTML = convs.map(conv => {
+        const isActive = conv.id === agentState.activeConversationId;
+        const firstMsg = (conv.messages || []).find(m => m.role === 'user' && m.text);
+        const title = firstMsg ? String(firstMsg.text).slice(0, 30) : (conv.title || '对话');
+        const time = conv.ts ? new Date(conv.ts).toLocaleDateString('zh-CN', {month:'numeric', day:'numeric'}) : '';
+        return `<button class="agent-chat-item${isActive ? ' active' : ''}" type="button" data-chat-id="${escapeHtml(conv.id)}"><span class="agent-chat-item-title">${escapeHtml(title)}</span><span class="agent-chat-item-time">${escapeHtml(time)}</span><button class="agent-chat-item-delete" type="button" data-chat-delete="${escapeHtml(conv.id)}"><i data-lucide="x"></i></button></button>`;
+    }).join('');
+    if(window.lucide) lucide.createIcons();
+    panel.querySelectorAll('[data-chat-id]').forEach(btn => {
+        btn.onclick = e => {
+            if(e.target.closest('[data-chat-delete]')) return;
+            agentSwitchChat(btn.dataset.chatId);
+            panel.hidden = true;
+        };
+    });
+    panel.querySelectorAll('[data-chat-delete]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const id = btn.dataset.chatDelete;
+            if(id === agentState.activeConversationId) agentDeleteChat();
+            else {
+                agentState.conversations = agentState.conversations.filter(c => c.id !== id);
+                renderAgentChatList();
+                saveAgentState();
+            }
+        };
+    });
+}
+function agentCopyMessage(text){
+    if(!text) return;
+    navigator.clipboard?.writeText(text).then(() => toast('已复制')).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toast('已复制');
+    });
+}
+function agentRetryMessage(msgId){
+    if(!agentState || agentSending) return;
+    const msgs = agentState.messages || [];
+    const idx = msgs.findIndex(m => m.id === msgId);
+    if(idx < 0) return;
+    // 找到该 assistant 消息对应的 user 消息
+    let userMsg = null;
+    for(let i = idx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
+    }
+    if(!userMsg) return;
+    // 删除该 assistant 消息及之后的所有消息
+    agentState.messages = msgs.slice(0, idx);
+    // 重新发送
+    if(agentInput) agentInput.value = userMsg.text || '';
+    sendAgentMessage();
+}
+function agentSystemPrompt(){
+    const parts = [];
+    const skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+    skills.forEach(skill => {
+        const text = String(skill?.content || '').trim();
+        if(text) parts.push(`Follow this skill document "${skill.name}" closely:${AGENT_NL}${AGENT_NL}${text}`);
+    });
+    parts.push(AGENT_FORMAT_INSTRUCTION);
+    return parts.join(AGENT_NL + AGENT_NL);
+}
+function agentHistoryMessages(){
+    return (agentState.messages || []).slice(-AGENT_HISTORY_MAX).map(m => {
+        if(m.role === 'user') return {role:'user', content:m.text || '(images only)'};
+        let content = m.text || '';
+        (m.generations || []).forEach(g => {
+            const n = (g.results || []).length;
+            if(n) content += `${AGENT_NL}[generated ${n} image(s) with prompt: ${g.prompt || ''}]`;
+        });
+        return {role:'assistant', content:content || '(no text)'};
+    });
+}
+function parseAgentResponse(raw){
+    const text = String(raw || '').trim();
+    const candidates = [text];
+    if(text.includes('```')){
+        const firstFence = text.indexOf('```');
+        const secondFence = text.indexOf('```', firstFence + 3);
+        if(secondFence > firstFence){
+            let inner = text.slice(firstFence + 3, secondFence).trim();
+            if(inner.startsWith('json')) inner = inner.slice(4).trim();
+            if(inner) candidates.unshift(inner);
+        }
+    }
+    const braceStart = text.indexOf('{');
+    const braceEnd = text.lastIndexOf('}');
+    if(braceStart >= 0 && braceEnd > braceStart) candidates.push(text.slice(braceStart, braceEnd + 1));
+    for(const candidate of candidates){
+        try {
+            const data = JSON.parse(candidate);
+            if(!data || typeof data !== 'object') continue;
+            const reply = typeof data.reply === 'string' ? data.reply : (typeof data.text === 'string' ? data.text : '');
+            const options = (Array.isArray(data.options) ? data.options : [])
+                .filter(o => o && typeof o.label === 'string' && typeof o.value === 'string')
+                .slice(0, 4)
+                .map(o => ({label:o.label.trim(), value:o.value.trim()}));
+            const prompts = (Array.isArray(data.prompts) ? data.prompts : [])
+                .filter(p => typeof p === 'string' && p.trim())
+                .slice(0, AGENT_GEN_MAX_PER_MSG)
+                .map(p => p.trim());
+            const generations = (Array.isArray(data.generations) ? data.generations : [])
+                .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
+                .slice(0, AGENT_GEN_MAX_PER_MSG)
+                .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
+            return {reply, options, prompts, generations};
+        } catch(e) { /* 尝试下一个候选 */ }
+    }
+    return {reply:text, generations:[]};
+}
+async function sendAgentMessage(){
+    if(agentSending || !agentState) return;
+    const text = String(agentInput?.value || '').trim();
+    const attachments = (Array.isArray(agentState.attachments) ? agentState.attachments : []).slice();
+    if(!text && !attachments.length) return;
+    if(!chatApiProviders().length){ toast(tr('smart.agentNeedChatModel')); return; }
+    const provider = resolveChatProviderId(agentState.chatProvider);
+    const model = resolveChatModel(agentState.chatModel, provider);
+    agentState.chatProvider = provider;
+    agentState.chatModel = model;
+    const userMsg = {id:uid('am'), role:'user', text, images:attachments, ts:Date.now()};
+    agentState.messages.push(userMsg);
+    agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+    agentState.attachments = [];
+    if(agentInput) agentInput.value = '';
+    renderAgentAttachments();
+    agentSending = true;
+    agentThinking = true;
+    renderAgentMessages();
+    saveAgentState();
+    const contextImages = attachments.slice();
+    if(agentState.autoContext !== false){
+        [...agentLastResults(), ...agentLastUserAttachments()].forEach(item => {
+            if(item?.url && contextImages.length < AGENT_LLM_IMAGE_MAX && !contextImages.some(i => i.url === item.url)) contextImages.push(item);
+        });
+    }
+    try {
+        const result = await fetch('/api/canvas-llm', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                message:text || '(please help me edit these images)',
+                messages:agentHistoryMessages().slice(0, -1),
+                images:contextImages.slice(0, AGENT_LLM_IMAGE_MAX).map(i => i.url),
+                videos:[],
+                model,
+                provider,
+                ms_model:provider === 'modelscope' ? model : '',
+                system_prompt:agentSystemPrompt()
+            })
+        }).then(async r => {
+            if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.promptLlmFailed')));
+            return r.json();
+        });
+        const parsed = parseAgentResponse(result.text || '');
+        // 如果用户点击了"重新生成提示词"，强制将 generations 设为空数组（只返回提示词，不生图）
+        const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+        if(lastUserMsg && String(lastUserMsg.text || '').includes('重新生成提示词')){
+            parsed.generations = [];
+        }
+        // 批量完整性检查：用户请求 N 张但 generations 不足时提示
+        const requestedCount = chatRequestedImageCount(text);
+        if(requestedCount > 0 && parsed.generations.length > 0 && parsed.generations.length < requestedCount){
+            parsed.reply += `${AGENT_NL}(注意：请求了 ${requestedCount} 张，但仅生成了 ${parsed.generations.length} 张的提示词)`;
+        }
+        const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
+        agentState.messages.push(assistantMsg);
+        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+        agentThinking = false;
+        renderAgentMessages();
+        saveAgentState();
+        if(assistantMsg.generations.length) await runAgentGenerations(assistantMsg, userMsg);
+    } catch(e) {
+        agentThinking = false;
+        agentState.messages.push({id:uid('am'), role:'assistant', text:`⚠️ ${String(e.message || e).slice(0, 300)}`, generations:[], ts:Date.now()});
+        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+        renderAgentMessages();
+        saveAgentState();
+    } finally {
+        agentSending = false;
+        agentThinking = false;
+        renderAgentMessages();
+    }
+}
+function agentCenterOnPoint(x, y){
+    // 考虑 Agent 面板宽度，使用可视区域中心
+    const agentPanelWidth = agentOpen ? 382 : 0;
+    const visibleCenterX = (shell.clientWidth - agentPanelWidth) / 2;
+    viewport.x = visibleCenterX - x * viewport.scale;
+    viewport.y = shell.clientHeight / 2 - y * viewport.scale;
+    applyViewport();
+    scheduleSave();
+}
+function agentCenterOnNode(node){
+    if(!node) return;
+    const rect = nodeRect(node);
+    agentCenterOnPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+}
+function agentFindEmptyPosition(count=1){
+    // A+C 方案：计算空白区域 + 右侧追加（水平排列，顶部对齐）
+    const imageNodes = (nodes || []).filter(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url));
+    const center = viewportCenter();
+    if(!imageNodes.length) return {x:center.x, y:center.y};
+    // 找到最右边的节点
+    let maxX = -Infinity;
+    let maxXNode = null;
+    imageNodes.forEach(n => {
+        const rect = nodeRect(n);
+        const right = rect.x + rect.width;
+        if(right > maxX){ maxX = right; maxXNode = n; }
+    });
+    if(!maxXNode) return {x:center.x, y:center.y};
+    // 在最右边节点的右侧水平放置新图，顶部对齐，有一点间距
+    const rect = nodeRect(maxXNode);
+    const gap = 40;
+    return {x:rect.x + rect.width + gap + 130, y:rect.y};
+}
+async function runAgentGenerations(assistantMsg, userMsg){
+    const gens = assistantMsg.generations || [];
+    if(!gens.length) return;
+    const genProviders = agentGenProviders();
+    if(!genProviders.length){
+        gens.forEach(g => { g.status = 'error'; g.error = tr('smart.agentNeedGenModel'); });
+        toast(tr('smart.agentNeedGenModel'));
+        renderAgentMessages();
+        saveAgentState();
+        return;
+    }
+    const providerId = genProviders.some(p => p.id === agentState.genProvider) ? agentState.genProvider : genProviders[0].id;
+    const models = providerImageModels(providerId);
+    const genModel = models.includes(agentState.genModel) ? agentState.genModel : (models[0] || '');
+    agentState.genProvider = providerId;
+    agentState.genModel = genModel;
+    const size = apiImageSize(agentState.genRatio || 'square', agentState.genResolution || '1k') || '1024x1024';
+    const lastResults = agentLastResults();
+    const currentAttach = (userMsg?.images || []).filter(i => i?.url);
+    const attachRefs = currentAttach.length ? currentAttach : agentLastUserAttachments();
+    await Promise.all(gens.map(async gen => {
+        gen.status = 'running';
+        renderAgentMessages();
+        // 先创建占位节点（按照图片尺寸来）
+        const placeholderNode = createImageNodeAt(agentFindEmptyPosition(gen.count), []);
+        if(placeholderNode){
+            placeholderNode.pending = gen.count;
+            placeholderNode.title = gen.prompt?.slice(0, 30) || '生成中...';
+            render();
+        }
+        try {
+            let refs = [];
+            if(gen.use_last_outputs) refs = refs.concat(lastResults);
+            if(gen.use_attachments) refs = refs.concat(attachRefs);
+            refs = imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX).map(r => ({url:r.url, name:r.name || 'ref'}));
+            const payload = {prompt:gen.prompt, provider_id:providerId, model:genModel, size, quality:agentState.genQuality || 'auto', n:1, reference_images:refs};
+            const tasks = await Promise.all(Array.from({length:gen.count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
+                if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.agentGenFail')));
+                return r.json();
+            })));
+            const results = await Promise.all(tasks.map(t => t.task_id).filter(Boolean).map(id => pollSmartCanvasTask(id)));
+            const urls = results.flatMap(res => resultMediaUrls(res)).map((item, i) => {
+                const url = typeof item === 'string' ? item : item?.url || '';
+                return {url, name:(typeof item === 'object' && item?.name) || `agent-${Date.now()}-${i + 1}.png`, kind:'image'};
+            }).filter(i => i.url);
+            gen.results = urls;
+            gen.status = 'done';
+            if(urls.length && placeholderNode){
+                // 生成完成后，更新占位节点为实际图片
+                undoSuppressed = true;
+                placeholderNode.images = urls.map(u => ({...u}));
+                placeholderNode.pending = 0;
+                placeholderNode.title = urls.length > 1 ? 'Group' : 'Image';
+                selectedId = placeholderNode.id;
+                undoSuppressed = false;
+                // 保存节点 ID 到 results，用于点击跳转
+                gen.results = gen.results.map((r, i) => ({...r, nodeId: placeholderNode.id, nodeX: Number(placeholderNode.x) || 0, nodeY: Number(placeholderNode.y) || 0}));
+            }
+        } catch(e) {
+            gen.status = 'error';
+            gen.error = String(e.message || e).slice(0, 200);
+            // 生成失败，删除占位节点
+            if(placeholderNode){
+                undoSuppressed = true;
+                nodes = nodes.filter(n => n.id !== placeholderNode.id);
+                undoSuppressed = false;
+            }
+        }
+        renderAgentMessages();
+        saveAgentState();
+        render();
+        scheduleSave();
+    }));
+}
+function agentCanvasImages(){
+    const items = [];
+    (nodes || []).forEach(node => {
+        if(!isSmartImageNode(node)) return;
+        (node.images || []).forEach(img => {
+            if(img?.url) items.push({url:img.url, name:img.name || node.title || 'image', nodeId:node.id, nodeTitle:node.title || '', x:Number(node.x) || 0, y:Number(node.y) || 0, ts:Number(node.created_at) || 0});
+        });
+    });
+    return items.sort((a, b) => b.ts - a.ts);
+}
+function showAgentMention(filter){
+    const panel = document.getElementById('agentMentionPanel');
+    if(!panel) return;
+    const images = agentCanvasImages();
+    const q = String(filter || '').toLowerCase();
+    const filtered = q ? images.filter(img => (img.name + ' ' + img.nodeTitle).toLowerCase().includes(q)) : images;
+    if(!filtered.length){
+        panel.innerHTML = '<div class="agent-mention-empty">画布中暂无图片</div>';
+        panel.hidden = false;
+        return;
+    }
+    agentMentionIdx = 0;
+    panel.innerHTML = filtered.slice(0, 20).map((img, i) => {
+        const time = img.ts ? new Date(img.ts).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) : '';
+        return `<button class="agent-mention-item${i === 0 ? ' active' : ''}" type="button" data-mention-url="${escapeHtml(img.url)}" data-mention-name="${escapeHtml(img.name)}" data-mention-node-id="${escapeHtml(img.nodeId || '')}" data-mention-x="${img.x || 0}" data-mention-y="${img.y || 0}"><img src="${escapeHtml(img.url)}" alt="" loading="lazy"><div class="agent-mention-item-info"><div class="agent-mention-item-name">${escapeHtml(img.name)}</div><div class="agent-mention-item-time">${escapeHtml(time)}</div></div></button>`;
+    }).join('');
+    panel.hidden = false;
+    panel.querySelectorAll('.agent-mention-item').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName, btn.dataset.mentionNodeId, btn.dataset.mentionX, btn.dataset.mentionY);
+        };
+    });
+}
+function hideAgentMention(){
+    const panel = document.getElementById('agentMentionPanel');
+    if(panel) panel.hidden = true;
+    agentMentionIdx = -1;
+}
+function insertAgentMention(url, name, nodeId, x, y){
+    if(!agentState || !url) return;
+    if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+    if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX && !agentState.attachments.some(a => a.url === url)){
+        agentState.attachments.push({url, name: name || 'canvas-image', nodeId: nodeId || '', x: Number(x) || 0, y: Number(y) || 0});
+    }
+    if(agentInput){
+        const val = agentInput.value;
+        const atIdx = val.lastIndexOf('@');
+        if(atIdx >= 0) agentInput.value = val.slice(0, atIdx);
+        agentInput.focus();
+    }
+    hideAgentMention();
+    renderAgentAttachments();
+    saveAgentState();
+}
+function agentMentionKeydown(e){
+    const panel = document.getElementById('agentMentionPanel');
+    if(!panel || panel.hidden) return false;
+    const items = panel.querySelectorAll('.agent-mention-item');
+    if(!items.length) return false;
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+        e.preventDefault();
+        agentMentionIdx = e.key === 'ArrowDown' ? Math.min(agentMentionIdx + 1, items.length - 1) : Math.max(agentMentionIdx - 1, 0);
+        items.forEach((el, i) => el.classList.toggle('active', i === agentMentionIdx));
+        items[agentMentionIdx]?.scrollIntoView({block:'nearest'});
+        return true;
+    }
+    if(e.key === 'Enter' && agentMentionIdx >= 0 && items[agentMentionIdx]){
+        e.preventDefault();
+        const btn = items[agentMentionIdx];
+        insertAgentMention(btn.dataset.mentionUrl, btn.dataset.mentionName, btn.dataset.mentionNodeId, btn.dataset.mentionX, btn.dataset.mentionY);
+        return true;
+    }
+    if(e.key === 'Escape'){
+        e.preventDefault();
+        hideAgentMention();
+        return true;
+    }
+    return false;
+}
+function agentAutoResizeInput(){
+    const textarea = document.getElementById('agentInput');
+    if(!textarea) return;
+    textarea.style.height = 'auto';
+    const maxH = 500;
+    const newH = Math.min(textarea.scrollHeight, maxH);
+    textarea.style.height = newH + 'px';
+    if(agentState){
+        agentState.inputHeight = newH;
+        saveAgentState();
+    }
+}
+function initAgentInputResize(){
+    const handle = document.getElementById('agentInputResize');
+    const textarea = document.getElementById('agentInput');
+    if(!handle || !textarea) return;
+    if(agentState?.inputHeight > 0) textarea.style.height = agentState.inputHeight + 'px';
+    // 根据文字自动拉高
+    textarea.addEventListener('input', agentAutoResizeInput);
+    let startY = 0, startH = 0;
+    handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        startY = e.clientY;
+        startH = textarea.offsetHeight;
+        handle.classList.add('dragging');
+        const onMove = ev => {
+            const delta = startY - ev.clientY;
+            const newH = Math.max(60, Math.min(startH + delta, 500));
+            textarea.style.height = newH + 'px';
+        };
+        const onUp = () => {
+            handle.classList.remove('dragging');
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            if(agentState){
+                agentState.inputHeight = textarea.offsetHeight;
+                saveAgentState();
+            }
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+}
+function initAgentPanel(){
+    if(!agentPanel) return;
+    loadAgentState();
+    agentMoveSelectsToDropdown();
+    renderAgentModelSelectors();
+    renderAgentAttachments();
+    renderAgentMessages();
+    initAgentInputResize();
+    // 下拉面板交互
+    const modelBtn = document.getElementById('agentModelBtn');
+    const modelPanel = document.getElementById('agentModelPanel');
+    const paramsBtn = document.getElementById('agentParamsBtn');
+    const paramsPanel = document.getElementById('agentParamsPanel');
+    function closeAllDropdowns(){
+        if(modelPanel) modelPanel.hidden = true;
+        if(paramsPanel) paramsPanel.hidden = true;
+    }
+    function showDropdown(btn, panel){
+        if(!btn || !panel) return;
+        // 把面板移到 document.body 中，避免被 Agent 面板的 backdrop-filter 遮挡
+        if(panel.parentElement !== document.body) document.body.appendChild(panel);
+        const rect = btn.getBoundingClientRect();
+        // 先显示面板以测量尺寸
+        panel.style.visibility = 'hidden';
+        panel.hidden = false;
+        const panelHeight = panel.offsetHeight;
+        const panelWidth = panel.offsetWidth;
+        panel.style.visibility = '';
+        // 水平位置：确保面板不会超出屏幕右边界
+        const maxLeft = window.innerWidth - panelWidth - 8;
+        panel.style.left = Math.min(Math.max(8, rect.left), Math.max(8, maxLeft)) + 'px';
+        panel.style.right = 'auto';
+        // 垂直位置：优先在按钮上方显示，如果空间不够则在下方显示
+        const spaceAbove = rect.top;
+        const spaceBelow = window.innerHeight - rect.bottom;
+        if(spaceAbove >= panelHeight + 8 || spaceAbove >= spaceBelow){
+            panel.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+            panel.style.top = 'auto';
+        } else {
+            panel.style.top = (rect.bottom + 6) + 'px';
+            panel.style.bottom = 'auto';
+        }
+        panel.hidden = false;
+    }
+    modelBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        const wasHidden = modelPanel?.hidden;
+        closeAllDropdowns();
+        if(wasHidden) showDropdown(modelBtn, modelPanel);
+    });
+    paramsBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        const wasHidden = paramsPanel?.hidden;
+        closeAllDropdowns();
+        if(wasHidden) showDropdown(paramsBtn, paramsPanel);
+    });
+    document.addEventListener('pointerdown', e => {
+        if(!e.target.closest('.agent-toolbar-dropdown-wrap') && !e.target.closest('.agent-dropdown-panel')) closeAllDropdowns();
+    }, true);
+    agentToggle?.addEventListener('click', () => toggleAgentPanel());
+    agentCloseBtn?.addEventListener('click', () => toggleAgentPanel(false));
+    document.getElementById('agentNewChatBtn')?.addEventListener('click', () => agentNewChat());
+    document.getElementById('agentDeleteChatBtn')?.addEventListener('click', () => agentDeleteChat());
+    document.getElementById('agentChatListBtn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        const panel = document.getElementById('agentChatListPanel');
+        if(!panel) return;
+        const wasHidden = panel.hidden;
+        if(wasHidden) renderAgentChatList();
+        panel.hidden = !wasHidden;
+    });
+    // 更多操作菜单（折叠新建/对话列表/删除）
+    const moreBtn = document.getElementById('agentMoreBtn');
+    const morePanel = document.getElementById('agentMorePanel');
+    moreBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(morePanel) morePanel.hidden = !morePanel.hidden;
+    });
+    document.addEventListener('pointerdown', e => {
+        if(morePanel && !morePanel.hidden && !e.target.closest('#agentMorePanel') && !e.target.closest('#agentMoreBtn')){
+            morePanel.hidden = true;
+        }
+    }, true);
+    document.addEventListener('pointerdown', e => {
+        const panel = document.getElementById('agentChatListPanel');
+        if(panel && !panel.hidden && !e.target.closest('#agentChatListPanel') && !e.target.closest('#agentChatListBtn')){
+            panel.hidden = true;
+        }
+    }, true);
+    agentChatProvider?.addEventListener('change', () => {
+        agentState.chatProvider = agentChatProvider.value;
+        agentState.chatModel = '';
+        renderAgentModelSelectors();
+        saveAgentState();
+    });
+    agentChatModel?.addEventListener('change', () => { agentState.chatModel = agentChatModel.value; saveAgentState(); });
+    agentGenProvider?.addEventListener('change', () => {
+        agentState.genProvider = agentGenProvider.value;
+        agentState.genModel = '';
+        renderAgentModelSelectors();
+        saveAgentState();
+    });
+    agentGenModel?.addEventListener('change', () => { agentState.genModel = agentGenModel.value; agentUpdateToolbarLabels(); saveAgentState(); });
+    // 参数面板交互
+    document.getElementById('agentRatioGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-ratio-btn');
+        if(!btn || !agentState) return;
+        agentState.genRatio = btn.dataset.ratio || 'square';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentResGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-res-btn');
+        if(!btn || !agentState) return;
+        agentState.genResolution = btn.dataset.res || '1k';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentCountGrid')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-count-btn');
+        if(!btn || !agentState) return;
+        agentState.genCount = Number(btn.dataset.count) || 1;
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    document.getElementById('agentQualitySeg')?.addEventListener('click', e => {
+        const btn = e.target.closest('.agent-quality-btn');
+        if(!btn || !agentState) return;
+        agentState.genQuality = btn.dataset.quality || '';
+        agentSyncParamsPanel();
+        agentUpdateToolbarLabels();
+        saveAgentState();
+    });
+    agentAttachBtn?.addEventListener('click', () => agentImageInput?.click());
+    agentImageInput?.addEventListener('change', () => {
+        agentAttachFiles(agentImageInput.files);
+        agentImageInput.value = '';
+    });
+    agentSendBtn?.addEventListener('click', () => sendAgentMessage());
+    agentInput?.addEventListener('input', () => {
+        const val = agentInput.value;
+        const cursorPos = agentInput.selectionStart || 0;
+        const beforeCursor = val.slice(0, cursorPos);
+        const atIdx = beforeCursor.lastIndexOf('@');
+        if(atIdx >= 0 && (atIdx === 0 || beforeCursor[atIdx - 1] === ' ' || beforeCursor[atIdx - 1] === '\n')){
+            const filter = beforeCursor.slice(atIdx + 1);
+            if(!filter.includes(' ') && !filter.includes('\n')) showAgentMention(filter);
+            else hideAgentMention();
+        } else hideAgentMention();
+    });
+    agentInput?.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if(agentMentionKeydown(e)) return;
+        if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+            e.preventDefault();
+            sendAgentMessage();
+        }
+    });
+    agentInput?.addEventListener('keyup', e => e.stopPropagation());
+    agentInput?.addEventListener('blur', () => setTimeout(hideAgentMention, 200));
+    agentInput?.addEventListener('paste', e => {
+        e.stopPropagation();
+        const files = [...(e.clipboardData?.files || [])].filter(f => String(f.type || '').startsWith('image/'));
+        if(files.length){
+            e.preventDefault();
+            agentAttachFiles(files);
+        }
+    });
+    ['dragenter', 'dragover'].forEach(evt => agentPanel.addEventListener(evt, e => {
+        e.preventDefault();
+        e.stopPropagation();
+        agentPanel.classList.add('drag-over-input');
+    }));
+    agentPanel.addEventListener('dragleave', e => {
+        if(!agentPanel.contains(e.relatedTarget)) agentPanel.classList.remove('drag-over-input');
+    });
+    agentPanel.addEventListener('drop', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        agentPanel.classList.remove('drag-over-input');
+        const files = [...(e.dataTransfer?.files || [])];
+        if(files.length) agentAttachFiles(files);
+    });
+}
 createMenu?.addEventListener('mousedown', event => event.stopPropagation());
 createMenu?.addEventListener('click', event => {
     event.stopPropagation();
@@ -17012,6 +18158,9 @@ window.addEventListener('studio-lang-change', () => {
     renderDynamicParams();
     renderInputThumbsRow(selectedNode());
     renderAssetLibrary();
+    renderAgentModelSelectors();
+    renderAgentSkill();
+    renderAgentMessages();
     if(document.getElementById('imageEditModal')?.classList.contains('open')){
         setImageEditMode(imageEditMode);
     }
@@ -17030,6 +18179,7 @@ window.onload = async () => {
     await loadConfig();
     await loadAssetLibrary();
     await loadCanvas();
+    initAgentPanel();
     syncApiKindToggleVisibility();
     render();
 };
