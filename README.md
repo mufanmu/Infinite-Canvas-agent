@@ -1,6 +1,34 @@
 # Infinite-Canvas
 Supports comfyui/API calls/modelscope calls
 
+----
+
+## 本分支改动说明（AI Agent 版）
+
+> 本仓库是基于原项目 [hero8152/Infinite-Canvas](https://github.com/hero8152/Infinite-Canvas) 的二次开发 fork，新增了智能画布 AI Agent 面板。
+
+### 新增功能
+1. AI Agent 侧边聊天面板（OneBox 风格），可与画布联动生图。
+2. `@` 引用当前画布中的图片，最新的图片排在最上面。
+3. 统一附件管理：Skill 文档与图片在同一处增删改查，支持一次上传多个。
+4. 输入框支持自定义拖拽/自动拉高。
+5. 多对话管理（新建 / 删除 / 对话列表，与画布绑定），消息支持复制 / 重试。
+6. 生图参数面板：质量（自动/高/中/低）、比例（9 种带图标）、分辨率（1K/2K/4K）、数量（1-8）。
+7. LLM 结构化确认流程：提出方案后返回选项按钮，「确认」直接开始生成、「修改」重新生成提示词。
+8. LLM 生图能力升级（角色/风格一致性、图片编辑、批量多样性、质量控制、实时反馈、图片组合、动态参数、风格迁移、图片理解等）。
+9. 生图占位：生成开始时先在画布放置占位骨架，完成后替换为实际图片；多张并发生成、顶部对齐向右排列。
+10. 在画布选中图片的悬浮工具栏最左侧新增「发送至 Agent」按钮。
+
+### 重要警示
+- **已关闭自动更新**：导航栏版本号显示为「Agent版(无自动更新)」。若从上游拉取/合并最新代码，可能覆盖本分支的 AI Agent 功能，请谨慎操作并先备份。
+- **main 分支与上游分叉**：本 fork 的 `main` 通过强制推送覆盖，历史与上游不一致，切勿直接向上游发起合并。
+- **禁止商业用途**：沿用原作者版权声明（见文末），二次开发须保持开源并注明来源作者。
+- **不要提交 API Key**：请在软件自带的「API 设置」界面填写 Key/URL，不要写入代码或提交到仓库（`.gitignore` 已排除敏感文件与运行时数据）。
+
+> This fork adds an AI Agent panel to the canvas. Auto-update is disabled; pulling upstream changes may overwrite the Agent features. The `main` branch was force-pushed and diverges from upstream. Do not commit API keys. Commercial use remains prohibited.
+
+----
+
 配套的chrome采集插件已经上线：https://chromewebstore.google.com/detail/infinite-canvas-%E5%9B%BE%E5%83%8F%E8%A7%86%E9%A2%91%E6%96%87%E5%AD%97%E6%8A%93%E5%8F%96%E5%B7%A5/ajfhnbklbmpfaaookhfakohabnpmlcic?authuser=0&hl=en
 
 详细教程：[https://youtu.be/1y9ShTvgC_w](https://youtu.be/r_y_9ALr7fg)
