@@ -17620,24 +17620,26 @@ function agentSystemPrompt(bypassThinking){
     const parts = [];
     const skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
     const hasSkills = skills.length > 0;
+    // 1. 如果有 skill，先放最强指令（首因效应）+ 中英双语，确保所有 LLM provider 都能理解
+    if(hasSkills){
+        parts.push(`【最重要规则 - skill 完整保留 / MOST IMPORTANT: Keep skill document intact】
+当有 skill 文档时，你生成的每一条 prompt 都必须完整、逐字保留 skill 文档中的核心描述内容，包括但不限于：画面风格、背景描述、构图布局、配色要求、文字排版、图形风格、质量要求等所有细节。
+你只能在"品牌主题/主体内容/变体方向"上做差异化，绝不能简化、改写、概括或丢失 skill 中的任何风格描述。
+正确做法：把 skill 文档的完整描述作为每条 prompt 的主体，然后在末尾或开头添加变体差异（如不同的品牌主题、不同的行业方向）。
+错误做法：只提取 skill 的部分内容、用自己的话概括、只写一个简短的 prompt 而忽略 skill 的详细描述。
+生成的每条 prompt 长度应该与 skill 文档本身相当，而不是简短的一句话。
+When a skill document is provided, every prompt you generate MUST fully and verbatim retain all core descriptions from the skill document, including but not limited to: art style, background, composition, color scheme, typography, graphic style, quality requirements, and all other details. You may only differentiate on "brand theme / subject content / variant direction". Never simplify, rewrite, summarize, or omit any style description from the skill.`);
+    }
+    // 2. skill 内容（用清晰分隔符标记，便于 LLM 识别边界）
     skills.forEach(skill => {
         const text = String(skill?.content || '').trim();
-        if(text) parts.push(`Follow this skill document "${skill.name}" closely:${AGENT_NL}${AGENT_NL}${text}`);
+        if(text) parts.push(`===== Skill 文档开始：${skill.name} =====${AGENT_NL}${AGENT_NL}${text}${AGENT_NL}${AGENT_NL}===== Skill 文档结束：${skill.name} =====`);
     });
     parts.push(AGENT_FORMAT_INSTRUCTION);
     // 注入用户在工具栏设置的生图数量，让 LLM 知道用户想要几张图
     const genCount = Math.max(1, Math.min(8, Number(agentState?.genCount) || 1));
     if(genCount > 1){
         parts.push(`用户在工具栏设置了生图数量为 ${genCount} 张。除非用户在消息中明确指定了其他数量，否则请按照 ${genCount} 张来生成。每张图应有不同的创意方向或变体。`);
-    }
-    // 有 skill 时的核心规则：必须完整保留 skill 内容
-    if(hasSkills){
-        parts.push(`【最重要规则 - skill 完整保留】
-当有 skill 文档时，你生成的每一条 prompt 都必须完整、逐字保留 skill 文档中的核心描述内容，包括但不限于：画面风格、背景描述、构图布局、配色要求、文字排版、图形风格、质量要求等所有细节。
-你只能在"品牌主题/主体内容/变体方向"上做差异化，绝不能简化、改写、概括或丢失 skill 中的任何风格描述。
-正确做法：把 skill 文档的完整描述作为每条 prompt 的主体，然后在末尾或开头添加变体差异（如不同的品牌主题、不同的行业方向）。
-错误做法：只提取 skill 的部分内容、用自己的话概括、只写一个简短的 prompt 而忽略 skill 的详细描述。
-生成的每条 prompt 长度应该与 skill 文档本身相当，而不是简短的一句话。`);
     }
     // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令
     const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
@@ -17658,6 +17660,10 @@ function agentSystemPrompt(bypassThinking){
 6. 如果是修改请求（"换成像素风"），仍返回 prompts，但 use_last_outputs 设为 true。`);
     } else {
         parts.push(`当前为直接模式。能生成就生成，返回 generations 数组。${hasSkills ? '每条 prompt 必须完整包含 skill 文档的所有描述内容。' : ''}`);
+    }
+    // 3. 末尾再强调 skill（近因效应），确保所有 provider 都不会遗漏
+    if(hasSkills){
+        parts.push(`【最后提醒 / FINAL REMINDER】你生成的每条 prompt 必须完整包含上方 Skill 文档的所有描述内容，不得简化、概括或遗漏。如果 prompt 长度明显短于 Skill 文档，说明你遗漏了内容，请重新生成。`);
     }
     return parts.join(AGENT_NL + AGENT_NL);
 }
@@ -18055,8 +18061,19 @@ async function sendAgentMessage(){
             if(item?.url && contextImages.length < AGENT_LLM_IMAGE_MAX && !contextImages.some(i => i.url === item.url)) contextImages.push(item);
         });
     }
+    // 通用保障：当有 skill 时，在 user message 末尾注入 skill 强制提醒
+    // 原因：不同 LLM provider 对 system_prompt 的处理方式不同：
+    //   - OpenAI 兼容 API（agnes/魔搭等）：system_prompt 作为 system role，高优先级 ✓
+    //   - gemini-cli（agy）：system_prompt 被拼成普通文本"系统要求：..."，优先级低，易忽略 ✗
+    // 在 user message 里追加提醒，确保所有 provider 都能看到 skill 要求
+    let messageText = text || '(please help me edit these images)';
+    const _skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+    if(_skills.length > 0){
+        const skillNames = _skills.map(s => s?.name).filter(Boolean).join('、');
+        messageText += `${AGENT_NL}${AGENT_NL}【重要提醒】你必须完整遵循 Skill 文档（${skillNames}）的所有描述。生成的每条 prompt 必须逐字保留 Skill 文档的风格、背景、构图、配色、排版等全部细节，只能改变主题/变体方向。不得简化、概括或遗漏。每条 prompt 长度应与 Skill 文档相当。`;
+    }
     const llmPayload = {
-        message:text || '(please help me edit these images)',
+        message:messageText,
         messages:agentHistoryMessages().slice(0, -1),
         images:contextImages.slice(0, AGENT_LLM_IMAGE_MAX).map(i => i.url),
         videos:[],
@@ -18337,7 +18354,13 @@ async function regenerateAgentPrompts(assistantMsg){
     agentSending = true;
     agentThinking = true;
     renderAgentMessages();
-    const regenMessage = originalUserText + AGENT_NL + AGENT_NL + `请重新生成第${currentIdx + 1}条提示词，要求与之前不同。当前第${currentIdx + 1}条是："${currentPrompt.prompt}"。请只返回一条新的提示词。`;
+    let regenMessage = originalUserText + AGENT_NL + AGENT_NL + `请重新生成第${currentIdx + 1}条提示词，要求与之前不同。当前第${currentIdx + 1}条是："${currentPrompt.prompt}"。请只返回一条新的提示词。`;
+    // 通用保障：重新生成时也注入 skill 强制提醒
+    const _regenSkills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+    if(_regenSkills.length > 0){
+        const skillNames = _regenSkills.map(s => s?.name).filter(Boolean).join('、');
+        regenMessage += `${AGENT_NL}${AGENT_NL}【重要提醒】你必须完整遵循 Skill 文档（${skillNames}）的所有描述。重新生成的 prompt 必须逐字保留 Skill 文档的风格、背景、构图、配色、排版等全部细节，只能改变主题/变体方向。不得简化、概括或遗漏。`;
+    }
     const llmPayload = {
         message: regenMessage,
         messages: agentHistoryMessages().slice(0, -1),
