@@ -17061,6 +17061,21 @@ function resolveFinalGenCount(text){
     const toolbar = Math.max(1, Math.min(8, Number(agentState?.genCount) || 1));
     return {count: toolbar, source:'toolbar'};
 }
+// 判断输入是否"模糊"（缺风格维度），用于思维模式前端兜底
+// 判断标准：字数少 + 不含风格/艺术流派关键词
+// 返回 true 表示需要先走阶段一（返回 options 让用户选风格）
+function isVagueImageRequest(text){
+    const t = String(text || '').trim();
+    if(!t) return false;
+    // 修改请求不算模糊（有明确的修改方向）
+    if(/改成|换成|转换成|修改为|变成|转为|改为|转成|调整|重新画|重画/i.test(t)) return false;
+    // 风格/艺术流派关键词
+    const styleKeywords = ['风','风格','主义','流派','艺术','画法','画风','渲染','摄影','插画','海报','logo','标志','图标','3d','3D','写实','动漫','水墨','油画','水彩','素描','速写','像素','赛博','蒸汽波','极简','极繁','扁平','卡通','可爱','复古','复古风','霓虹','蒸汽','lowpoly','low poly','波普','波普艺术','印象派','抽象','超现实','涂鸦','手绘','国风','中国风','日式','和风','美式','欧式','赛博朋克','蒸汽朋克','未来主义','装饰艺术','artdeco','art deco','bauhaus','包豪斯','印象','点彩','浮世绘','赛璐珞','吉卜力','新海诚','皮克斯','迪士尼','漫威','dc','chibi','q版','q版','q版','q版','q版'];
+    const hasStyle = styleKeywords.some(k => t.toLowerCase().includes(k.toLowerCase()));
+    // 字数少且无风格 → 模糊
+    if(t.length < 25 && !hasStyle) return true;
+    return false;
+}
 function agentRatioLabel(key){
     const map = {square:'1:1', portrait:'2:3', portrait43:'3:4', landscape43:'4:3', landscape:'3:2', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21'};
     return map[key] || key || '1:1';
@@ -17295,7 +17310,7 @@ function agentMessageHtml(msg){
             // 当前项展开操作按钮
             let itemActionsHtml = '';
             if(p.status === 'current'){
-                itemActionsHtml = `<div class="agent-prompt-item-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="confirm" data-agent-prompt-id="${escapeHtml(msg.id)}">确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="edit" data-agent-prompt-id="${escapeHtml(msg.id)}">修改</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="regenerate" data-agent-prompt-id="${escapeHtml(msg.id)}">重新生成</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="skip" data-agent-prompt-id="${escapeHtml(msg.id)}">跳过</button></div>`;
+                itemActionsHtml = `<div class="agent-prompt-item-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="confirm" data-agent-prompt-id="${escapeHtml(msg.id)}">确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="edit" data-agent-prompt-id="${escapeHtml(msg.id)}">修改</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="regenerate" data-agent-prompt-id="${escapeHtml(msg.id)}">重新生成</button></div>`;
             } else if(p.status === 'editing'){
                 itemActionsHtml = `<div class="agent-prompt-item-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="save-edit" data-agent-prompt-id="${escapeHtml(msg.id)}">保存并确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="cancel-edit" data-agent-prompt-id="${escapeHtml(msg.id)}">取消</button></div>`;
             }
@@ -17331,7 +17346,10 @@ function renderAgentMessages(){
         agentMessages.innerHTML = msgs.map(agentMessageHtml).join('') + thinking;
     }
     if(window.lucide) lucide.createIcons();
-    agentMessages.scrollTop = agentMessages.scrollHeight;
+    // 延迟滚动：确保布局完成后再滚动到底部，避免卡片高度变化导致底部按钮被裁切
+    requestAnimationFrame(() => {
+        if(agentMessages) agentMessages.scrollTop = agentMessages.scrollHeight;
+    });
     if(agentSendBtn) agentSendBtn.disabled = agentSending;
     // 绑定消息操作按钮
     agentMessages.querySelectorAll('[data-agent-copy]').forEach(btn => {
@@ -17418,7 +17436,6 @@ function renderAgentMessages(){
             const msg = (agentState.messages || []).find(m => m.id === msgId);
             if(!msg) return;
             if(action === 'confirm') confirmAgentPrompt(msg);
-            else if(action === 'skip') skipAgentPrompt(msg);
             else if(action === 'regenerate') regenerateAgentPrompts(msg);
             else if(action === 'edit') editAgentPrompt(msg);
             else if(action === 'save-edit') saveAgentPromptEdit(msg);
@@ -17659,19 +17676,49 @@ When a skill document is provided, every prompt you generate MUST fully and verb
     // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令
     const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
     if(thinkingModeOn){
-        parts.push(`当前为思维模式。请只返回 prompts 数组（不要返回 generations 数组）。
+        parts.push(`当前为思维模式（用户参与决策模式）。核心原则：用户在生图前必须看到并确认每一条提示词，确认后才统一生图。
 
-重要规则：
-1. 每个 prompt 对象的 count 固定为 1。不要在单个 prompt 中用 count>1 来生成多张图。
-2. 系统要求生成N张图时（见上方"出图数量"），prompts 数组必须返回恰好N条不同的 prompt（每条 count=1），让用户逐个确认。
-   数量由系统决定，你无需判断用户想要几张，只需按系统给定的数量返回对应条数。
-   例如系统要求4张，就返回4条不同的 prompt（水墨龙、油画龙、赛博龙、Q版龙等）。
-3. 每个 prompt 对象包含：prompt(中文提示词), count(固定为1), use_last_outputs(bool), use_attachments(bool)。
-4. 用户会逐个确认后才统一生图，所以每条 prompt 都应该是完整、独立、可单独生成的。
-   Skill 描述的是单张图样式（含画面内元素排列），不决定出图数量。即使 skill 写了"合集/一整页/系列"，也按系统给定的数量返回多条 prompt，每条都完整包含 skill 的样式描述。
-   ${hasSkills ? '每条 prompt 都必须完整包含 skill 文档的所有描述内容，只在主题/变体上做差异化（见上方"skill 完整保留"规则）。' : ''}
-5. 如果请求模糊，可以先返回 options 让用户选方向，下一轮再返回 prompts。
-6. 如果是修改请求（"换成像素风"），仍返回 prompts，但 use_last_outputs 设为 true。`);
+【参数权重 / Parameter Priority】（由系统决定，你无需判断，也不要在prompt里加数量/比例/分辨率描述）
+- 出图数量：输入框显式要求 > 工具栏设置（软参数）
+- 比例/分辨率：工具栏说了算（硬参数），输入框不覆盖
+- 你只需按系统给定的数量返回对应条数，不要自行增减。
+
+【两阶段流程 / Two-Stage Flow】
+
+■ 阶段一：风格引导（仅当输入"缺风格"时触发）
+判断标准——用户的输入有6个信息维度：①主体 ②风格(画风/艺术流派) ③场景/背景 ④配色 ⑤构图 ⑥细节特征。
+- 如果只有①主体，缺②风格 → 必须返回 2-4 个 options（风格/方向选项）让用户选择，不要直接返回 prompts。
+  选项示例：[水墨风、油画风、赛博朋克、Q版卡通] 或 [极简logo、复古徽章、几何扁平、手绘插画]
+  返回 {"reply":"请选择一个风格方向：","options":[{"label":"水墨风","value":"水墨风"},...],"prompts":[],"generations":[]}
+- 如果②风格已存在（即使简短如"水墨风的狗"），跳过阶段一，直接进入阶段二。
+
+■ 阶段二：扩写/优化 + 确认（用户选了风格后，或输入本身已有风格时进入）
+根据输入完整度分三档处理：
+
+【档A：大幅扩写】——有主体+风格，但场景/配色/构图/细节缺失3项以上
+你必须大幅扩写，补全所有缺失维度，生成完整可直接生图的中文提示词。
+示例：用户输入"一只狗，水墨风" → 你扩写为"一只水墨风格的西高地白犬，中国传统水墨画技法，淡墨晕染毛发，浓墨点睛，大量留白营造意境，毛笔笔触可见，站姿端正微微侧头，眼神温和灵动，背景大面积留白，右下角有朱砂印章，意境悠远，水墨画质感，宣纸纹理"
+
+【档B：适度优化】——主体+风格+场景+配色+构图+细节大部分都有
+不要重写用户的核心描述，只做适度优化：补充技术参数（如"高质量、印刷级精度"）、理顺语句、确保完整性。
+如果输入已经足够完整专业，可以基本保持原样，但在 reply 里说明"你的提示词已较完整，可直接确认或微调"。
+示例：用户输入"海报设计，大师级排版，极繁主义，配色协调，波点，半调图案..." → 你保持核心描述，补充"高质量海报输出，印刷级精度"即可，不要把"极繁主义"改成"极简主义"，不要删减用户写的细节。
+
+【档C：修改请求】——用户说"换成像素风""改成夜景"等
+返回 prompts，use_last_outputs 设为 true（引用上一轮图片）。在已有基础上做修改，保留未要求改动的部分。
+
+【返回规则】
+1. 只返回 prompts 数组，不要返回 generations 数组。
+2. 每个 prompt 对象的 count 固定为 1。不要用 count>1。
+3. 系统要求生成N张图时（见上方"出图数量"），prompts 数组返回恰好N条。
+   每条必须是完整的、可直接生图的中文提示词。
+   N条之间在主题方向/变体方向上有差异（不是换风格，而是在同一风格下做变体）。
+   例如用户选了"水墨风"+系统要3张 → 返回3条水墨风prompt，分别画不同姿态/场景/氛围的狗。
+4. 每个 prompt 对象包含：prompt(中文提示词), count(固定为1), use_last_outputs(bool), use_attachments(bool)。
+5. 用户会逐条确认（确认/修改/重新生成），全部确认后才统一生图。
+6. 所有prompt必须中文，包含主体/风格/构图/光线/色彩/细节/氛围。
+7. 文字规则：默认prompt不包含文字内容，除非skill文档明确要求或用户明确要求"加文字"。
+${hasSkills ? '8. 每条 prompt 必须完整包含 skill 文档的所有描述内容，只在主题/变体上做差异化（见上方"skill 完整保留"规则）。Skill 描述单张图样式，不决定出图数量。' : ''}`);
     } else {
         parts.push(`当前为直接模式。能生成就生成，返回 generations 数组。
 重要规则：
@@ -17942,6 +17989,18 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
             // 如果 LLM 同时返回了 prompts，合并（generations 转换的在前）
             parsed.prompts = convertedPrompts.concat(parsed.prompts);
             parsed.generations = [];
+        }
+        // 1.5 前端兜底：思维模式下，如果输入模糊（缺风格）但 LLM 返回了 prompts（没走阶段一），强制走 options
+        // 这样即使 LLM 没按系统提示词执行阶段一，前端也能保证"先选风格再扩写"的流程
+        if(!isModifyRequest && parsed.prompts.length > 0 && parsed.options.length === 0 && isVagueImageRequest(text)){
+            parsed.prompts = [];
+            parsed.options = [
+                {label:'水墨风', value:'水墨风'},
+                {label:'油画风', value:'油画风'},
+                {label:'赛博朋克', value:'赛博朋克'},
+                {label:'Q版卡通', value:'Q版卡通'}
+            ];
+            parsed.reply = '你的输入比较简略，请先选择一个风格方向，我再为你扩写完整提示词：';
         }
         // 2. 如果 prompts 仍为空，创建默认 prompt
         if(parsed.prompts.length === 0 && parsed.options.length === 0 && parsed.generations.length === 0){
@@ -18249,14 +18308,6 @@ async function confirmAgentPrompt(assistantMsg){
     const idx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
     if(idx < 0) return;
     prompts[idx].status = 'confirmed';
-    await _advanceToNextOrGenerate(assistantMsg);
-}
-// 跳过当前提示词：标记为 skipped，推进到下一个 pending
-async function skipAgentPrompt(assistantMsg){
-    const prompts = assistantMsg.prompts || [];
-    const idx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
-    if(idx < 0) return;
-    prompts[idx].status = 'skipped';
     await _advanceToNextOrGenerate(assistantMsg);
 }
 // 修改提示词：进入内联编辑模式（不跳出确认流程，不设置 bypass 标志）
