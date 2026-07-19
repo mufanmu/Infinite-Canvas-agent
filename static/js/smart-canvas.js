@@ -17042,13 +17042,24 @@ function toggleAgentPanel(open=!agentOpen){
 }
 function chatRequestedImageCount(text){
     const t = String(text || '');
-    const m = t.match(/(?<!\d)([1-4])\s*(?:张|幅|个|组|套)(?!\d)/);
+    // 阿拉伯数字 1-8：3张/5个/8条/画4张/生成6个
+    const m = t.match(/(?<!\d)([1-8])\s*(?:张|幅|个|组|套|条|只|名|版|款)(?!\d)/);
     if(m) return parseInt(m[1], 10);
-    const cnMap = {一:1, 二:2, 两:2, 俩:2, 三:3, 四:4};
+    // 中文数字 1-8
+    const cnMap = {一:1, 二:2, 两:2, 俩:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8};
     for(const [k, v] of Object.entries(cnMap)){
-        if(t.includes(k + '张') || t.includes(k + '幅')) return v;
+        if(t.includes(k + '张') || t.includes(k + '幅') || t.includes(k + '个') || t.includes(k + '条')) return v;
     }
     return 0;
+}
+// 统一的数量决策函数：输入框显式要求 > 工具栏设置
+// 设计原则：出图数量是"软参数"，输入框显式表达优先；比例/分辨率是"硬参数"，工具栏说了算（不在此函数处理）
+// 返回 {count, source}，count 始终 >=1
+function resolveFinalGenCount(text){
+    const fromInput = chatRequestedImageCount(text);
+    if(fromInput > 0) return {count: Math.min(8, fromInput), source:'input'};
+    const toolbar = Math.max(1, Math.min(8, Number(agentState?.genCount) || 1));
+    return {count: toolbar, source:'toolbar'};
 }
 function agentRatioLabel(key){
     const map = {square:'1:1', portrait:'2:3', portrait43:'3:4', landscape43:'4:3', landscape:'3:2', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21'};
@@ -17616,19 +17627,22 @@ function agentRetryMessage(msgId){
     if(agentInput) agentInput.value = userMsg.text || '';
     sendAgentMessage();
 }
-function agentSystemPrompt(bypassThinking){
+function agentSystemPrompt(bypassThinking, finalCount){
     const parts = [];
     const skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
     const hasSkills = skills.length > 0;
     // 1. 如果有 skill，先放最强指令（首因效应）+ 中英双语，确保所有 LLM provider 都能理解
     if(hasSkills){
         parts.push(`【最重要规则 - skill 完整保留 / MOST IMPORTANT: Keep skill document intact】
-当有 skill 文档时，你生成的每一条 prompt 都必须完整、逐字保留 skill 文档中的核心描述内容，包括但不限于：画面风格、背景描述、构图布局、配色要求、文字排版、图形风格、质量要求等所有细节。
-你只能在"品牌主题/主体内容/变体方向"上做差异化，绝不能简化、改写、概括或丢失 skill 中的任何风格描述。
-正确做法：把 skill 文档的完整描述作为每条 prompt 的主体，然后在末尾或开头添加变体差异（如不同的品牌主题、不同的行业方向）。
-错误做法：只提取 skill 的部分内容、用自己的话概括、只写一个简短的 prompt 而忽略 skill 的详细描述。
-生成的每条 prompt 长度应该与 skill 文档本身相当，而不是简短的一句话。
-When a skill document is provided, every prompt you generate MUST fully and verbatim retain all core descriptions from the skill document, including but not limited to: art style, background, composition, color scheme, typography, graphic style, quality requirements, and all other details. You may only differentiate on "brand theme / subject content / variant direction". Never simplify, rewrite, summarize, or omit any style description from the skill.`);
+Skill 文档描述的是"单张图的样式"，包括：画面风格、背景、构图布局、画面内元素排列（如"横3竖4排列12个方案""九宫格"）、配色、文字排版、图形风格、质量要求等所有细节。
+Skill 不决定生成几张图——出图数量由系统决定（综合工具栏和输入框），系统会告诉你需要几张。你无需从 skill 或用户消息中推断数量。
+即使 skill 中出现"一整页""合集""系列探索板"等词，那也是描述单张图的样式，不代表只生成1张图。
+你生成的每一条 prompt 都必须完整、逐字保留 skill 文档中的所有样式描述。
+你只能在"主题/主体/变体方向"上做差异化，绝不能简化、改写、概括或丢失 skill 中的任何描述。
+正确做法：把 skill 文档的完整描述作为每条 prompt 的主体，然后在末尾或开头添加变体差异。
+错误做法：把"合集/一整页"理解为只出1张；简化 skill 内容；只写简短 prompt。
+每条 prompt 长度应与 skill 文档相当。
+When a skill document is provided, every prompt you generate MUST fully and verbatim retain all style descriptions from the skill document. The skill describes the style of a SINGLE image (including internal element layout like "3x4 grid"). It does NOT decide how many images to generate — that is decided by the system. Even words like "collection/series/full page" in the skill describe single-image style, not output count.`);
     }
     // 2. skill 内容（用清晰分隔符标记，便于 LLM 识别边界）
     skills.forEach(skill => {
@@ -17636,10 +17650,11 @@ When a skill document is provided, every prompt you generate MUST fully and verb
         if(text) parts.push(`===== Skill 文档开始：${skill.name} =====${AGENT_NL}${AGENT_NL}${text}${AGENT_NL}${AGENT_NL}===== Skill 文档结束：${skill.name} =====`);
     });
     parts.push(AGENT_FORMAT_INSTRUCTION);
-    // 注入用户在工具栏设置的生图数量，让 LLM 知道用户想要几张图
-    const genCount = Math.max(1, Math.min(8, Number(agentState?.genCount) || 1));
-    if(genCount > 1){
-        parts.push(`用户在工具栏设置了生图数量为 ${genCount} 张。除非用户在消息中明确指定了其他数量，否则请按照 ${genCount} 张来生成。每张图应有不同的创意方向或变体。`);
+    // 注入最终出图数量（前端已决策：输入框显式要求 > 工具栏设置）
+    // LLM 无需自行判断数量，只需按此数量返回对应条数的 prompt
+    const _finalCount = Math.max(1, Math.min(8, Number(finalCount) || Number(agentState?.genCount) || 1));
+    if(_finalCount > 1){
+        parts.push(`【出图数量 / Output Count】系统要求生成 ${_finalCount} 张图。每张是独立的图片，在主题/变体方向上差异化。数量已由系统决定（综合工具栏设置和输入框显式要求），你无需自行判断，只需返回 ${_finalCount} 条 prompt。`);
     }
     // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令
     const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
@@ -17648,13 +17663,12 @@ When a skill document is provided, every prompt you generate MUST fully and verb
 
 重要规则：
 1. 每个 prompt 对象的 count 固定为 1。不要在单个 prompt 中用 count>1 来生成多张图。
-2. 用户请求N张图时，prompts 数组必须返回恰好N条不同的 prompt（每条 count=1），让用户逐个确认。
-   例如用户说"生成4张龙"，prompts 必须返回4条不同的龙的提示词（水墨龙、油画龙、赛博龙、Q版龙等）。
-   如果用户在工具栏设置了数量（如上方提到的），也按该数量返回 prompts。
+2. 系统要求生成N张图时（见上方"出图数量"），prompts 数组必须返回恰好N条不同的 prompt（每条 count=1），让用户逐个确认。
+   数量由系统决定，你无需判断用户想要几张，只需按系统给定的数量返回对应条数。
+   例如系统要求4张，就返回4条不同的 prompt（水墨龙、油画龙、赛博龙、Q版龙等）。
 3. 每个 prompt 对象包含：prompt(中文提示词), count(固定为1), use_last_outputs(bool), use_attachments(bool)。
 4. 用户会逐个确认后才统一生图，所以每条 prompt 都应该是完整、独立、可单独生成的。
-   即使 skill 文档中描述的是"生成一张展示图/合集图"，在思维模式下也要拆成多条独立的 prompt（每条生成一张独立的图），
-   而不是只返回1条 prompt。如果 skill 明确要求生成合集图且用户只想要1张，用户会在消息中说明。
+   Skill 描述的是单张图样式（含画面内元素排列），不决定出图数量。即使 skill 写了"合集/一整页/系列"，也按系统给定的数量返回多条 prompt，每条都完整包含 skill 的样式描述。
    ${hasSkills ? '每条 prompt 都必须完整包含 skill 文档的所有描述内容，只在主题/变体上做差异化（见上方"skill 完整保留"规则）。' : ''}
 5. 如果请求模糊，可以先返回 options 让用户选方向，下一轮再返回 prompts。
 6. 如果是修改请求（"换成像素风"），仍返回 prompts，但 use_last_outputs 设为 true。`);
@@ -17663,7 +17677,7 @@ When a skill document is provided, every prompt you generate MUST fully and verb
     }
     // 3. 末尾再强调 skill（近因效应），确保所有 provider 都不会遗漏
     if(hasSkills){
-        parts.push(`【最后提醒 / FINAL REMINDER】你生成的每条 prompt 必须完整包含上方 Skill 文档的所有描述内容，不得简化、概括或遗漏。如果 prompt 长度明显短于 Skill 文档，说明你遗漏了内容，请重新生成。`);
+        parts.push(`【最后提醒 / FINAL REMINDER】你生成的每条 prompt 必须完整包含上方 Skill 文档的所有描述内容，不得简化、概括或遗漏。Skill 描述的是单张图样式（含画面内排列），不决定出图数量——出图数量按系统给定的执行。如果 prompt 长度明显短于 Skill 文档，说明你遗漏了内容，请重新生成。`);
     }
     return parts.join(AGENT_NL + AGENT_NL);
 }
@@ -17887,13 +17901,11 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
         parsed.generations = [];
     }
     // 批量完整性检查（P2-12：弱化为显示提示，不再强制追加 reply）
-    // 优先从文本解析数量，如果文本没有则回退到工具栏设置的 genCount
-    let requestedCount = chatRequestedImageCount(text);
-    if(!requestedCount){
-        requestedCount = Math.max(1, Math.min(8, Number(agentState?.genCount) || 1));
-        // 如果 genCount <= 1，相当于没有明确请求多张，设为 0 不触发数量逻辑
-        if(requestedCount <= 1) requestedCount = 0;
-    }
+    // 前端数量决策：输入框显式要求 > 工具栏设置（与 sendAgentMessage 一致）
+    // 优先用 sendAgentMessage 已存入 userMsg 的值，避免重复计算导致不一致
+    let requestedCount = userMsg?.requestedCount || resolveFinalGenCount(text).count;
+    // 如果最终数量 <= 1，相当于没有明确请求多张，设为 0 不触发数量逻辑
+    if(requestedCount <= 1) requestedCount = 0;
     if(thinkingModeOn){
         const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
         const isModifyRequest = userModifyRe.test(text);
@@ -18071,10 +18083,13 @@ async function sendAgentMessage(){
     //   - gemini-cli（agy）：system_prompt 被拼成普通文本"系统要求：..."，优先级低，易忽略 ✗
     // 在 user message 里追加提醒，确保所有 provider 都能看到 skill 要求
     let messageText = text || '(please help me edit these images)';
+    // 前端数量决策：输入框显式要求 > 工具栏设置（软参数覆盖）
+    const _finalCount = resolveFinalGenCount(text);
+    if(_finalCount.count > 1) userMsg.requestedCount = _finalCount.count;
     const _skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
     if(_skills.length > 0){
         const skillNames = _skills.map(s => s?.name).filter(Boolean).join('、');
-        messageText += `${AGENT_NL}${AGENT_NL}【重要提醒】你必须完整遵循 Skill 文档（${skillNames}）的所有描述。生成的每条 prompt 必须逐字保留 Skill 文档的风格、背景、构图、配色、排版等全部细节，只能改变主题/变体方向。不得简化、概括或遗漏。每条 prompt 长度应与 Skill 文档相当。`;
+        messageText += `${AGENT_NL}${AGENT_NL}【重要提醒】你必须完整遵循 Skill 文档（${skillNames}）的所有描述。Skill 描述的是单张图的样式（含画面内元素排列、构图、配色、排版等），每条 prompt 必须逐字保留这些样式描述，只能改变主题/变体方向。不得简化、概括或遗漏。每条 prompt 长度应与 Skill 文档相当。注意：Skill 不决定生成几张图，出图数量由系统决定（${_finalCount.count}张${_finalCount.source === 'input' ? '，来自你的输入要求' : '，来自工具栏设置'}）。`;
     }
     const llmPayload = {
         message:messageText,
@@ -18084,7 +18099,7 @@ async function sendAgentMessage(){
         model,
         provider,
         ms_model:provider === 'modelscope' ? model : '',
-        system_prompt:agentSystemPrompt(bypassThinking)
+        system_prompt:agentSystemPrompt(bypassThinking, _finalCount.count)
     };
     try {
         // 创建后端 LLM 任务（息屏/刷新不会丢失）
