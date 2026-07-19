@@ -4601,14 +4601,14 @@ def gpt_image_2_skill_size_arg(size="", model="", prompt="", provider="openai"):
     size_text = str(size or "").strip()
     if str(provider or "").strip().lower() == "codex":
         if "1k" in text or "1024" in text:
-            return "1K"
+            return "auto"
         if "2k" in text or "2048" in text:
             return "2K"
         if "4k" in text or "3840" in text:
             return "4K"
         width, height = parse_size_pair(size_text)
         if 0 < max(width, height) < 1800:
-            return "1K"
+            return "auto"
         if 1800 <= max(width, height) < 3000:
             return "2K"
         return "4K"
@@ -4631,7 +4631,7 @@ def gpt_image_2_skill_size_arg(size="", model="", prompt="", provider="openai"):
     if "4k" in text or "3840" in text:
         return "4K"
     if "1k" in text or "1024" in text:
-        return "1K"
+        return "auto"
     return "2K"
 
 def gpt_image_2_skill_prompt_arg(prompt="", size="", provider="openai"):
@@ -4639,6 +4639,7 @@ def gpt_image_2_skill_prompt_arg(prompt="", size="", provider="openai"):
     if str(provider or "").strip().lower() != "codex":
         return prompt_text
     size_arg = gpt_image_2_skill_size_arg(size, "", prompt, provider)
+    size_display = "1K" if size_arg == "auto" else size_arg
     size_text = str(size or "").strip()
     width, height = parse_size_pair(size_text)
     ratio_text = ""
@@ -4652,15 +4653,15 @@ def gpt_image_2_skill_prompt_arg(prompt="", size="", provider="openai"):
             height = int(ratio_match.group(2))
             ratio_text = f"{width}:{height}"
     if not ratio_text:
-        return f"{prompt_text} 画质要求：目标输出 {size_arg} 高分辨率图片。 Image quality requirement: output a {size_arg} high-resolution image."
+        return f"{prompt_text} 画质要求：目标输出 {size_display} 高分辨率图片。 Image quality requirement: output a {size_display} high-resolution image."
     orientation_zh = "横版/宽幅" if width > height else ("竖版/长幅" if height > width else "正方形")
     orientation_en = "landscape/wide" if width > height else ("portrait/tall" if height > width else "square")
     return (
         f"{prompt_text} "
-        f"画质要求：目标输出 {size_arg} 高分辨率图片。"
+        f"画质要求：目标输出 {size_display} 高分辨率图片。"
         f"画幅要求：必须生成 {orientation_zh} 图片，宽高比 {ratio_text}。"
         f"请不要交换宽高，不要输出反向比例。"
-        f" Image quality requirement: output a {size_arg} high-resolution image."
+        f" Image quality requirement: output a {size_display} high-resolution image."
         f" Canvas requirement: generate a {orientation_en} image with aspect ratio {ratio_text}; "
         "do not swap width and height."
     )
