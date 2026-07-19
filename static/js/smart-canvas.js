@@ -17919,8 +17919,8 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
             parsed.prompts = [{prompt:text, count:1, use_last_outputs:isModifyRequest, use_attachments:false, status:'pending'}];
             if(!parsed.reply) parsed.reply = '请确认以下提示词：';
         }
-        // 3. 兜底：如果用户设置了 genCount>1 或文本请求了N张，但 LLM 只返回了少量 prompts，
-        // 自动补充到请求数量（复制并标注变体序号），确保用户能确认足够数量的图
+        // 3. 数量校准：如果用户设置了 genCount>1 或文本请求了N张
+        // 3a. 少于请求数量 → 补充
         if(requestedCount > 1 && parsed.prompts.length > 0 && parsed.prompts.length < requestedCount){
             const basePrompts = parsed.prompts.slice();
             while(parsed.prompts.length < requestedCount){
@@ -17935,12 +17935,16 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
                 });
             }
         }
+        // 3b. 多于请求数量 → 截断到请求数量
+        if(requestedCount > 1 && parsed.prompts.length > requestedCount){
+            parsed.prompts = parsed.prompts.slice(0, requestedCount);
+        }
     }
-    // 直接模式数量兜底：如果非思维模式且 generations 总数不足 requestedCount，补充到请求数量
+    // 直接模式数量校准：如果非思维模式，校准 generations 总数到 requestedCount
     if(!thinkingModeOn && requestedCount > 1 && parsed.generations.length > 0){
         const currentTotal = parsed.generations.reduce((s, g) => s + (Math.max(1, Math.min(8, Number(g.count) || 1))), 0);
         if(currentTotal < requestedCount){
-            // 优先增加现有 generation 的 count，直到达到 requestedCount
+            // 少于请求数量 → 补充：优先增加现有 generation 的 count，直到达到 requestedCount
             let need = requestedCount - currentTotal;
             for(let i = 0; i < parsed.generations.length && need > 0; i++){
                 const g = parsed.generations[i];
@@ -17965,6 +17969,23 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
                 });
                 need -= add;
             }
+        } else if(currentTotal > requestedCount){
+            // 多于请求数量 → 截断到请求数量
+            let remaining = requestedCount;
+            const truncated = [];
+            for(let i = 0; i < parsed.generations.length && remaining > 0; i++){
+                const g = parsed.generations[i];
+                const cur = Math.max(1, Math.min(8, Number(g.count) || 1));
+                if(cur <= remaining){
+                    truncated.push(g);
+                    remaining -= cur;
+                } else {
+                    // 部分截取这个 generation 的 count
+                    truncated.push({...g, count: remaining});
+                    remaining = 0;
+                }
+            }
+            parsed.generations = truncated;
         }
     }
     const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
