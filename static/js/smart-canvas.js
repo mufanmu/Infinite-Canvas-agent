@@ -17795,6 +17795,9 @@ function parseAgentResponse(raw, lastUserText){
 // 提取为独立函数，以便刷新恢复时复用
 async function processAgentLlmResult(result, text, attachments, userMsg){
     const parsed = parseAgentResponse(result.text || '', text);
+    // 提前计算思维模式状态，使兜底逻辑能感知
+    const bypassThinking = userMsg?.bypassThinking === true;
+    const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
     // 生图意图兜底 + 修改意图检测
     {
         const lastUser = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
@@ -17840,11 +17843,12 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
             }
             if(parsed.generations.length === 0 && parsed.prompts.length === 0){
                 // 场景A：LLM 没返回 generations 也没返回 prompts，需要兜底构造
+                // 思维模式下不创建兜底 generation（让后续 thinkingModeOn 块创建 prompt 待确认）
                 const genInProgressRe = /正在生成|正在为你生成|正在为您生成|生成中|开始生成|马上生成|这就为你生成|这就为您生成|好的[,，]?\s*我来生成|好的[,，]?\s*马上|我将为你生成|我将为您生成|我来为你生成|我来为您生成|正在为你创建|正在为您创建|正在画|正在创建/i;
                 const userGenIntentRe = /我要生成|帮我生成|帮我画|画一|生成一|创建一|制作一|来一张|来幅|来张|给我画|给我生成|帮我创建|帮我做/i;
                 const meaninglessConfirmRe = /确认要生成|确认生成|确认要画|要为您生成.*吗|要生成.*吗|确认.*吗.*[？?]/i;
                 const noOptions = !parsed.options || parsed.options.length === 0;
-                const hasGenInProgress = genInProgressRe.test(replyText);
+                const hasGenInProgress = !thinkingModeOn && genInProgressRe.test(replyText);
                 const hasUserGenIntent = noOptions && userGenIntentRe.test(userText);
                 const hasMeaninglessConfirm = noOptions && meaninglessConfirmRe.test(replyText);
                 const hasAnyIntent = hasGenInProgress || hasUserGenIntent || isModifyScenario || hasMeaninglessConfirm;
@@ -17890,14 +17894,14 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
         // 如果 genCount <= 1，相当于没有明确请求多张，设为 0 不触发数量逻辑
         if(requestedCount <= 1) requestedCount = 0;
     }
-    const bypassThinking = userMsg?.bypassThinking === true;
-    const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
     if(thinkingModeOn){
         const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
         const isModifyRequest = userModifyRe.test(text);
         // 思维模式下，无论是否修改请求，都走 prompts 确认流程
-        // 1. generations → prompts 转换（如果有 generations）
-        if(parsed.generations.length > 0 && parsed.options.length === 0){
+        // 1. generations → prompts 转换（始终转换，不受 options 影响）
+        //    之前的 bug：条件含 parsed.options.length === 0，导致 LLM 同时返回 options+generations 时
+        //    generations 跳过转换直接执行，绕过了确认流程
+        if(parsed.generations.length > 0){
             // 将 generations 转为 prompts 对象数组（透传 count/use_last_outputs/use_attachments）
             // 兜底：如果某个 generation 的 count>1，拆成多条 prompts（每条 count=1），确保用户逐个确认
             // 保留 LLM 已返回的 prompts，只在前面追加转换结果
