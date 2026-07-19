@@ -17651,10 +17651,10 @@ When a skill document is provided, every prompt you generate MUST fully and verb
     });
     parts.push(AGENT_FORMAT_INSTRUCTION);
     // 注入最终出图数量（前端已决策：输入框显式要求 > 工具栏设置）
-    // LLM 无需自行判断数量，只需按此数量返回对应条数的 prompt
+    // LLM 无需自行判断数量，只需按此数量返回对应条数
     const _finalCount = Math.max(1, Math.min(8, Number(finalCount) || Number(agentState?.genCount) || 1));
     if(_finalCount > 1){
-        parts.push(`【出图数量 / Output Count】系统要求生成 ${_finalCount} 张图。每张是独立的图片，在主题/变体方向上差异化。数量已由系统决定（综合工具栏设置和输入框显式要求），你无需自行判断，只需返回 ${_finalCount} 条 prompt。`);
+        parts.push(`【出图数量 / Output Count】系统要求生成 ${_finalCount} 张图。每张是独立的图片，在主题/品牌方向/变体方向上必须有明显差异（不能只是换个颜色或微调）。数量已由系统决定（综合工具栏设置和输入框显式要求），你无需自行判断，只需返回恰好 ${_finalCount} 条。`);
     }
     // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令
     const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
@@ -17673,7 +17673,14 @@ When a skill document is provided, every prompt you generate MUST fully and verb
 5. 如果请求模糊，可以先返回 options 让用户选方向，下一轮再返回 prompts。
 6. 如果是修改请求（"换成像素风"），仍返回 prompts，但 use_last_outputs 设为 true。`);
     } else {
-        parts.push(`当前为直接模式。能生成就生成，返回 generations 数组。${hasSkills ? '每条 prompt 必须完整包含 skill 文档的所有描述内容。' : ''}`);
+        parts.push(`当前为直接模式。能生成就生成，返回 generations 数组。
+重要规则：
+1. 每条 generation 的 count 固定为 1。不要用 count>1 来生成多张图。
+2. 系统要求生成N张图时（见上方"出图数量"），generations 数组必须返回恰好N条不同的 generation（每条 count=1），每条在主题/品牌方向上必须有明显差异。
+   例如系统要求3张 Logo 合集图，就返回3条 generation，分别用不同的品牌主题（如科技品牌、教育品牌、生活方式品牌）。
+3. 不要返回2条或1条然后让前端补充——必须返回恰好N条，否则会导致重复生成。
+4. 每个 generation 对象包含：prompt(中文提示词), count(固定为1), use_last_outputs(bool), use_attachments(bool)。
+${hasSkills ? '5. 每条 generation 的 prompt 必须完整包含 skill 文档的所有描述内容，只在主题/品牌方向上做差异化（见上方"skill 完整保留"规则）。' : ''}`);
     }
     // 3. 末尾再强调 skill（近因效应），确保所有 provider 都不会遗漏
     if(hasSkills){
@@ -17962,53 +17969,32 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
             parsed.prompts = parsed.prompts.slice(0, requestedCount);
         }
     }
-    // 直接模式数量校准：如果非思维模式，校准 generations 总数到 requestedCount
+    // 直接模式数量校准：如果非思维模式，校准 generations 条数到 requestedCount
+    // 重要：不通过增加 count 来补充（count>1 会用同一 prompt 发多次请求，导致生成重复图）
+    // 而是追加新的 generation 条目，并加上变体指令让 LLM 的 prompt 有差异
     if(!thinkingModeOn && requestedCount > 1 && parsed.generations.length > 0){
-        const currentTotal = parsed.generations.reduce((s, g) => s + (Math.max(1, Math.min(8, Number(g.count) || 1))), 0);
-        if(currentTotal < requestedCount){
-            // 少于请求数量 → 补充：优先增加现有 generation 的 count，直到达到 requestedCount
-            let need = requestedCount - currentTotal;
-            for(let i = 0; i < parsed.generations.length && need > 0; i++){
-                const g = parsed.generations[i];
-                const cur = Math.max(1, Math.min(8, Number(g.count) || 1));
-                const canAdd = Math.min(need, 8 - cur);
-                if(canAdd > 0){
-                    g.count = cur + canAdd;
-                    need -= canAdd;
-                }
-            }
-            // 如果所有 generation 都到上限8还不够，追加新的 generation
-            while(need > 0){
-                const base = parsed.generations[parsed.generations.length % parsed.generations.length];
-                const add = Math.min(need, 8);
+        const currentCount = parsed.generations.length;
+        if(currentCount < requestedCount){
+            // 少于请求数量 → 追加新 generation（不增加 count，避免重复）
+            const basePrompts = parsed.generations.slice();
+            while(parsed.generations.length < requestedCount){
+                const base = basePrompts[parsed.generations.length % basePrompts.length];
+                const variantIdx = parsed.generations.length - basePrompts.length + 1;
                 parsed.generations.push({
-                    prompt: String(base.prompt || text || '') + `（变体${Math.floor(parsed.generations.length / (parsed.generations.length || 1)) + 1}）`,
-                    count: add,
+                    prompt: String(base.prompt || text || '') + `（请使用完全不同的品牌主题/行业方向作为变体${variantIdx}，确保与前面生成的内容有明显差异）`,
+                    count: 1,
                     use_last_outputs: !!base.use_last_outputs,
                     use_attachments: !!base.use_attachments,
                     results: [],
                     status: 'running'
                 });
-                need -= add;
             }
-        } else if(currentTotal > requestedCount){
+        } else if(currentCount > requestedCount){
             // 多于请求数量 → 截断到请求数量
-            let remaining = requestedCount;
-            const truncated = [];
-            for(let i = 0; i < parsed.generations.length && remaining > 0; i++){
-                const g = parsed.generations[i];
-                const cur = Math.max(1, Math.min(8, Number(g.count) || 1));
-                if(cur <= remaining){
-                    truncated.push(g);
-                    remaining -= cur;
-                } else {
-                    // 部分截取这个 generation 的 count
-                    truncated.push({...g, count: remaining});
-                    remaining = 0;
-                }
-            }
-            parsed.generations = truncated;
+            parsed.generations = parsed.generations.slice(0, requestedCount);
         }
+        // 确保每条 generation 的 count=1（防止 LLM 返回 count>1 导致重复）
+        parsed.generations.forEach(g => { g.count = 1; });
     }
     const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
     // P2-12: 记录请求数量到消息，用于卡片显示校验
