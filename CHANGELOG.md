@@ -51,3 +51,8 @@
 - **系统提示词重构**：明确告知 LLM「数量已由系统决定，你无需判断」，消除 Skill「合集/一整页」被误读为只出1张的歧义
 - **用户消息 Skill 提醒加数量归属**：提示用户当前数量来自输入框还是工具栏
 - **直接模式重复生图修复**：数量校准改为追加新 generation（count=1）而非增加 count，强制所有 generation count=1
+
+#### v1.5.1 — 单 generation 多图泄漏修复
+- **API 单次返回多图修复**：某些 provider 单次生图调用会返回多张图，导致单个 generation 节点出现多张图。现在限制每个 generation 最多只取 `gen.count` 张图
+- **参考图 URL 过滤**：某些 provider 会在响应中回显输入的参考图 URL，造成「重复」问题。现在过滤掉与参考图 URL 相同的结果
+- **count=1 强制范围扩大**：直接模式下无论 `requestedCount` 是否大于 1，都强制所有 generation 的 `count=1`（之前只在 `requestedCount > 1` 时才强制，存在漏洞）

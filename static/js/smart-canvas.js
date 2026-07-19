@@ -17993,7 +17993,10 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
             // 多于请求数量 → 截断到请求数量
             parsed.generations = parsed.generations.slice(0, requestedCount);
         }
-        // 确保每条 generation 的 count=1（防止 LLM 返回 count>1 导致重复）
+    }
+    // 直接模式下，无论 requestedCount 多少，强制所有 generation 的 count=1
+    // （防止 LLM 返回 count>1 导致同一 prompt 发多次请求、生成重复图）
+    if(!thinkingModeOn && parsed.generations.length > 0){
         parsed.generations.forEach(g => { g.count = 1; });
     }
     const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
@@ -18490,10 +18493,14 @@ async function runAgentGenerations(assistantMsg, userMsg){
             if(placeholderNode) gen.placeholderNodeId = placeholderNode.id;
             saveAgentState();
             const results = await Promise.all(imageTaskIds.map(id => pollSmartCanvasTask(id)));
+            // 限制每个 generation 最多只取 gen.count 张图（防止 API 单次返回多张图导致节点图片重复）
+            // 同时过滤掉参考图 URL（防止某些 provider 在响应中回显输入的参考图，造成"重复"问题）
+            const _maxCount = Math.max(1, Math.min(8, Number(gen.count) || 1));
+            const _refUrlSet = new Set((refs || []).map(r => r?.url).filter(Boolean));
             const urls = results.flatMap(res => resultMediaUrls(res)).map((item, i) => {
                 const url = typeof item === 'string' ? item : item?.url || '';
                 return {url, name:(typeof item === 'object' && item?.name) || `agent-${Date.now()}-${i + 1}.png`, kind:'image'};
-            }).filter(i => i.url);
+            }).filter(i => i.url && !_refUrlSet.has(i.url)).slice(0, _maxCount);
             gen.results = urls;
             gen.status = 'done';
             if(urls.length && placeholderNode){
@@ -18542,10 +18549,12 @@ async function recoverAgentGenerations(){
             }
             try {
                 const results = await Promise.all(gen.taskIds.map(id => pollSmartCanvasTask(id)));
+                // 限制每个 generation 最多只取 gen.count 张图（与 runAgentGenerations 一致，防止 API 单次返回多张图）
+                const _maxCount = Math.max(1, Math.min(8, Number(gen.count) || 1));
                 const urls = results.flatMap(res => resultMediaUrls(res)).map((item, idx) => {
                     const url = typeof item === 'string' ? item : item?.url || '';
                     return {url, name:(typeof item === 'object' && item?.name) || `agent-${Date.now()}-${idx + 1}.png`, kind:'image'};
-                }).filter(i => i.url);
+                }).filter(i => i.url).slice(0, _maxCount);
                 gen.results = urls;
                 gen.status = 'done';
                 if(urls.length && placeholderNode){
