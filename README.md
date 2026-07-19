@@ -7,68 +7,15 @@ Supports comfyui/API calls/modelscope calls
 
 > 本仓库是基于原项目 [hero8152/Infinite-Canvas](https://github.com/hero8152/Infinite-Canvas) 的二次开发 fork，新增了智能画布 AI Agent 面板。
 >
-> **当前版本：v1.5**（查看 [版本更新日志](#版本更新日志)）
+> **当前版本：v1.5**（查看 [版本更新大纲](./CHANGELOG.md)）
 
-### 版本更新大纲
-
-#### v1.0 — AI Agent 面板基线
-- AI Agent 侧边聊天面板（OneBox 风格），画布联动生图
-- `@` 引用画布图片，附件统一管理（Skill 文档 + 图片）
-- 多对话管理（新建/删除/列表，与画布绑定）
-- 生图参数面板：质量/比例(9种)/分辨率(1K-4K)/数量(1-8)
-- LLM 结构化确认流程（选项按钮 → 确认/修改）
-- 生图占位机制（占位骨架 → 完成替换，顶部对齐排列）
-- 选中图片悬浮工具栏「发送至 Agent」按钮
-
-#### v1.1 — 对话理解与生图稳定性
-- 系统提示词重写（5 种对话模式，强制中文提示词）
-- 修改场景智能区分（风格修改 vs 主体更换）
-- LLM 任务后端化（`/api/agent-llm-task` + WebSocket 实时通知）
-- 刷新恢复生图任务（`taskIds` + `placeholderNodeId`）
-- agy CLI 生图修复（纯文字回退 `gpt-image-2-skill`）
-- 占位按选中比例展示 + 生图后尺寸重算
-- 占位顶部对齐 + 正计时 + 并发多图不叠加
-- 提示词展开/收起，复制优先 prompt
-
-#### v1.3 — 思维模式与稳定性
-- 思维模式开关（LLM 扩写 → 确认/重新生成/修改 三步流程）
-- 绕过机制（修改后跳过二次确认直接生图）
-- 修改请求关键词识别（改成/换成/重新画）
-- 全模型模糊需求统一触发风格选项
-- 发送按钮失效修复（`agentBypassThinkingNext` 未声明）
-- LLM 任务 5 分钟超时保护 + 恢复逻辑超时清理
-- 思维模式开关视觉优化（active 态 + Tooltip）
-
-#### v1.4 — 多图确认流程重构 + Skill 完整保留
-- **全部确认后统一生图**：确认流程从「逐张确认即生图」改为「全部确认/跳过后统一生图」，占位节点整齐排列
-- **prompts 状态机**：`pending → current → confirmed/skipped`，支持逐条确认/跳过/反悔
-- **内联编辑**：修改提示词改为卡片内 textarea 编辑，不再跳出确认流程
-- **全部确认/取消快捷按钮**：prompts ≥ 2 时显示「全部确认并生成」「全部取消」
-- **确认中发送新消息拦截**：有未确认 prompts 时弹窗提示
-- **刷新恢复确认进度**：中断后恢复到确认卡片，不触发生图
-- **画布对齐修复**：占位节点串行创建，解决阶梯上升/重叠
-- **生图数量校准**：按工具栏/输入框数量自动补充或截断 prompts/generations
-- **Skill 完整保留**：首因+近因效应中英双语指令，确保所有 LLM provider 逐字保留 Skill 描述
-- **用户消息注入 Skill 提醒**：适配 gemini-cli 等 system_prompt 处理较弱的 provider
-- **思维模式兜底 bug 修复**：LLM 回复含「正在为您生成」时不再绕过确认流程直接生图
-
-### 重要警示
+### 重要提示
 - **已关闭自动更新**：导航栏版本号显示为「Agent版(无自动更新)」。若从上游拉取/合并最新代码，可能覆盖本分支的 AI Agent 功能，请谨慎操作并先备份。
 - **main 分支与上游分叉**：本 fork 的 `main` 通过强制推送覆盖，历史与上游不一致，切勿直接向上游发起合并。
 - **禁止商业用途**：沿用原作者版权声明（见文末），二次开发须保持开源并注明来源作者。
 - **不要提交 API Key到仓库**：请在软件自带的「API 设置」界面填写 Key/URL，不要写入代码或提交到仓库（`.gitignore` 已排除敏感文件与运行时数据）。
 
 > This fork adds an AI Agent panel to the canvas. Auto-update is disabled; pulling upstream changes may overwrite the Agent features. The `main` branch was force-pushed and diverges from upstream. Do not commit API keys. Commercial use remains prohibited.
-
-#### v1.5 — 硬软参数分层 + Skill 定位明确
-- **硬软参数分层设计**：
-  - 软参数（出图数量）：输入框显式要求 > 工具栏设置
-  - 硬参数（比例/分辨率）：工具栏说了算，输入框不覆盖
-- **Skill 定位明确**：Skill 描述「单张图样式」（含画面内元素排列如横3竖4），不决定出图数量
-- **统一数量决策函数** `resolveFinalGenCount`：前端决策数量，LLM 不碰参数，agy 等弱 provider 也不翻车
-- **数量提取增强**：支持 1-8，增加条/只/名/版/款等量词，中文数字支持到八
-- **系统提示词重构**：明确告知 LLM「数量已由系统决定，你无需判断」，消除 Skill「合集/一整页」被误读为只出1张的歧义
-- **用户消息 Skill 提醒加数量归属**：提示用户当前数量来自输入框还是工具栏
 
 ### 版本更新日志
 
