@@ -16795,6 +16795,39 @@ let agentMentionIdx = -1;
 function agentDefaultState(){
     return {skills:[], attachments:[], messages:[], conversations:[], activeConversationId:'', chatProvider:'', chatModel:'', genProvider:'', genModel:'', genRatio:'square', genResolution:'1k', genCount:1, genQuality:'', autoContext:true, inputHeight:0};
 }
+// 将 prompts 规范化为对象数组（兼容旧格式 string[]）
+// 每个 prompt 对象：{prompt, count, use_last_outputs, use_attachments, status}
+// status 取值：pending / current / confirmed / skipped / editing
+function normalizePrompts(prompts){
+    if(!Array.isArray(prompts)) return [];
+    return prompts.map(p => {
+        if(typeof p === 'string'){
+            const t = p.trim();
+            return t ? {prompt:t, count:1, use_last_outputs:false, use_attachments:false, status:'pending'} : null;
+        }
+        if(p && typeof p === 'object' && typeof p.prompt === 'string' && p.prompt.trim()){
+            return {
+                prompt:p.prompt.trim(),
+                count:Math.max(1, Math.min(8, Number(p.count) || 1)),
+                use_last_outputs:!!p.use_last_outputs,
+                use_attachments:!!p.use_attachments,
+                status:p.status || 'pending'
+            };
+        }
+        return null;
+    }).filter(p => p);
+}
+// 确保消息有 current prompt（如果没有 current/editing，找第一个 pending 标记为 current）
+function ensureCurrentPrompt(msg){
+    if(!msg || msg.role !== 'assistant' || !Array.isArray(msg.prompts) || msg.prompts.length === 0) return;
+    if(!msg.prompts.some(p => p.status === 'current' || p.status === 'editing')){
+        const firstPending = msg.prompts.findIndex(p => !p.status || p.status === 'pending');
+        if(firstPending >= 0){
+            msg.prompts[firstPending].status = 'current';
+            msg.promptIdx = firstPending;
+        }
+    }
+}
 function agentStorageKey(){ return AGENT_STORAGE_PREFIX + (canvasId || 'default'); }
 // 生图 provider 列表：与主画布的 imageProviders() 不同，这里不排除 modelscope/volcengine，
 // 因为后端 /api/canvas-image-tasks 统一支持它们（主画布排除它们仅因专用引擎 UI）。
@@ -16833,6 +16866,26 @@ function loadAgentState(){
     // 加载当前对话的 messages
     const activeConv = agentState.conversations.find(c => c.id === agentState.activeConversationId);
     agentState.messages = activeConv ? (activeConv.messages || []).slice(-AGENT_MSG_MAX) : [];
+    // 旧数据迁移：prompts string[] → object[]
+    (agentState.messages || []).forEach(m => {
+        if(m.role === 'assistant' && Array.isArray(m.prompts) && m.prompts.length > 0){
+            const hasObjectPrompts = m.prompts.some(p => typeof p === 'object');
+            if(!hasObjectPrompts){
+                // 旧格式 string[]
+                if(m.generations && m.generations.length > 0){
+                    // 已经生成过了，标记为已确认
+                    m.prompts = m.prompts.map(p => ({prompt:String(p).trim(), count:1, use_last_outputs:false, use_attachments:false, status:'confirmed'}));
+                } else {
+                    // 还在确认阶段
+                    m.prompts = normalizePrompts(m.prompts);
+                    ensureCurrentPrompt(m);
+                }
+            } else {
+                // 新格式但可能缺少 current 指针
+                ensureCurrentPrompt(m);
+            }
+        }
+    });
     // 恢复中断的操作
     _setupAgentRecovery();
 }
@@ -16923,6 +16976,24 @@ function _setupAgentRecovery(){
             }
         })();
         return;
+    }
+    // P1-10: 情况2.5 —— 有未完成的 prompts（确认阶段中断）→ 只恢复确认卡片，不触发生图
+    {
+        let hasPendingPrompts = false;
+        for(let i = msgs.length - 1; i >= 0; i--){
+            if(msgs[i].role !== 'assistant') continue;
+            const ps = msgs[i].prompts;
+            if(Array.isArray(ps) && ps.length > 0 && ps.some(p => p.status === 'pending' || p.status === 'current' || p.status === 'editing')){
+                hasPendingPrompts = true;
+            }
+            break;
+        }
+        if(hasPendingPrompts){
+            // 确保当前消息有 current 指针（loadAgentState 已做，这里兜底）
+            ensureCurrentPrompt(msgs[msgs.length - 1]);
+            renderAgentMessages();
+            return;
+        }
     }
     // 情况3：只有 pendingMessage 但没有 LLM task（LLM 还没创建就断了）→ 提示重新发送
     if(pendingText && agentState.messages.length){
@@ -17190,18 +17261,58 @@ function agentMessageHtml(msg){
     // 思维模式提示词确认卡片（有未确认的 prompts 时显示）
     let promptCardHtml = '';
     if(msg.role === 'assistant' && Array.isArray(msg.prompts) && msg.prompts.length > 0){
-        const idx = msg.promptIdx || 0;
-        if(idx < msg.prompts.length){
-            const currentPrompt = msg.prompts[idx];
-            const counter = msg.prompts.length > 1 ? ` (${idx + 1}/${msg.prompts.length})` : '';
-            promptCardHtml = `<div class="agent-prompt-card"><div class="agent-prompt-card-header">📝 提示词${counter}</div><div class="agent-prompt-card-body">${escapeHtml(currentPrompt)}</div><div class="agent-prompt-card-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="confirm" data-agent-prompt-id="${escapeHtml(msg.id)}">确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="regenerate" data-agent-prompt-id="${escapeHtml(msg.id)}">重新生成提示词</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="edit" data-agent-prompt-id="${escapeHtml(msg.id)}">修改提示词</button></div></div>`;
-        }
+        const prompts = msg.prompts;
+        const currentIdx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
+        const hasUnresolved = prompts.some(p => p.status === 'pending' || p.status === 'current' || p.status === 'editing');
+        // P2-12: 数量校验显示
+        const requestedCount = msg.requestedCount || 0;
+        const countHint = (requestedCount > 0 && requestedCount !== prompts.length) ? ` · 请求${requestedCount}张/返回${prompts.length}条` : '';
+        const confirmedCount = prompts.filter(p => p.status === 'confirmed').length;
+        const skippedCount = prompts.filter(p => p.status === 'skipped').length;
+        const progressParts = [];
+        if(confirmedCount > 0) progressParts.push(`${confirmedCount}已确认`);
+        if(skippedCount > 0) progressParts.push(`${skippedCount}已跳过`);
+        const progress = progressParts.length ? ` · ${progressParts.join(' · ')}` : '';
+        // 构建 prompt 列表（已确认/已跳过的折叠，当前展开，pending 灰色）
+        const listHtml = prompts.map((p, i) => {
+            const statusIcon = p.status === 'confirmed' ? '✓' : p.status === 'skipped' ? '×' : p.status === 'current' || p.status === 'editing' ? '▶' : '○';
+            const itemClass = p.status === 'confirmed' ? 'confirmed' : p.status === 'skipped' ? 'skipped' : p.status === 'current' || p.status === 'editing' ? 'current' : 'pending';
+            const shortText = (p.prompt || '').length > 40 ? (p.prompt || '').slice(0, 40) + '…' : (p.prompt || '');
+            // 已确认/已跳过的项可点击展开反悔
+            const canReopen = p.status === 'confirmed' || p.status === 'skipped';
+            const reopenAttr = canReopen ? `data-agent-prompt-reopen="${escapeHtml(msg.id)}" data-agent-prompt-index="${i}"` : '';
+            // 当前项展开操作按钮
+            let itemActionsHtml = '';
+            if(p.status === 'current'){
+                itemActionsHtml = `<div class="agent-prompt-item-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="confirm" data-agent-prompt-id="${escapeHtml(msg.id)}">确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="edit" data-agent-prompt-id="${escapeHtml(msg.id)}">修改</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="regenerate" data-agent-prompt-id="${escapeHtml(msg.id)}">重新生成</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="skip" data-agent-prompt-id="${escapeHtml(msg.id)}">跳过</button></div>`;
+            } else if(p.status === 'editing'){
+                itemActionsHtml = `<div class="agent-prompt-item-actions"><button class="agent-prompt-btn primary" type="button" data-agent-prompt-action="save-edit" data-agent-prompt-id="${escapeHtml(msg.id)}">保存并确认</button><button class="agent-prompt-btn" type="button" data-agent-prompt-action="cancel-edit" data-agent-prompt-id="${escapeHtml(msg.id)}">取消</button></div>`;
+            }
+            const itemBodyHtml = p.status === 'editing'
+                ? `<textarea class="agent-prompt-edit-area" data-agent-prompt-edit="${escapeHtml(msg.id)}" rows="3">${escapeHtml(p.prompt || '')}</textarea>`
+                : (p.status === 'current' ? `<div class="agent-prompt-card-body">${escapeHtml(p.prompt || '')}</div>` : '');
+            return `<div class="agent-prompt-list-item ${itemClass}" ${reopenAttr}><div class="agent-prompt-list-header"><span class="agent-prompt-list-icon">${statusIcon}</span><span class="agent-prompt-list-index">#${i + 1}</span><span class="agent-prompt-list-text">${escapeHtml(shortText)}</span></div>${itemBodyHtml}${itemActionsHtml}</div>`;
+        }).join('');
+        // P1-7: 全部确认快捷按钮（prompts≥2 且有未处理项时显示）
+        const showConfirmAll = prompts.length >= 2 && hasUnresolved;
+        const confirmAllHtml = showConfirmAll ? `<button class="agent-prompt-btn primary agent-prompt-confirm-all" type="button" data-agent-prompt-action="confirm-all" data-agent-prompt-id="${escapeHtml(msg.id)}">全部确认并生成</button>` : '';
+        // P2-15: 全部取消按钮（有未处理项时显示）
+        const showCancelAll = hasUnresolved;
+        const cancelAllHtml = showCancelAll ? `<button class="agent-prompt-btn agent-prompt-cancel-all" type="button" data-agent-prompt-action="cancel-all" data-agent-prompt-id="${escapeHtml(msg.id)}">全部取消</button>` : '';
+        const footerHtml = (confirmAllHtml || cancelAllHtml) ? `<div class="agent-prompt-card-footer">${confirmAllHtml}${cancelAllHtml}</div>` : '';
+        promptCardHtml = `<div class="agent-prompt-card"><div class="agent-prompt-card-header">📝 提示词确认${countHint}${progress}</div><div class="agent-prompt-list">${listHtml}</div>${footerHtml}</div>`;
     }
     return `<div class="agent-msg ${msg.role === 'user' ? 'user' : 'assistant'}">${msg.text ? `<div class="agent-msg-bubble">${escapeHtml(msg.text)}</div>` : ''}${imgs ? `<div class="agent-msg-thumbs">${imgs}</div>` : ''}${gens}${promptCardHtml}${optionsHtml}${actions}</div>`;
 }
 function renderAgentMessages(){
     if(!agentMessages || !agentState) return;
     const msgs = agentState.messages || [];
+    // 确保 prompts 状态一致（兼容旧数据、恢复 current 指针）
+    msgs.forEach(m => {
+        if(m.role === 'assistant' && Array.isArray(m.prompts) && m.prompts.length > 0){
+            ensureCurrentPrompt(m);
+        }
+    });
     if(!msgs.length && !agentThinking){
         agentMessages.innerHTML = `<div class="agent-empty"><i data-lucide="bot"></i>${escapeHtml(tr('smart.agentEmpty'))}</div>`;
     } else {
@@ -17246,19 +17357,26 @@ function renderAgentMessages(){
             if(agentSending) return;
             const value = btn.dataset.agentOption;
             if(value === '确认'){
-                // 使用 prompts 构建 generations 并开始生成
+                // 选项"确认"=全部确认并生成：将所有未跳过的 prompts 标记为 confirmed 并构建 generations
                 const lastAssistantMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant' && (m.prompts?.length || m.generations?.length));
                 if(lastAssistantMsg){
                     const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
-                    // 如果有 prompts 但没有 generations，使用 prompts 构建 generations
                     if(lastAssistantMsg.prompts?.length && !lastAssistantMsg.generations?.length){
-                        lastAssistantMsg.generations = lastAssistantMsg.prompts.map(prompt => ({
-                            prompt,
-                            count: 1,
-                            use_last_outputs: false,
-                            use_attachments: false,
-                            results: [],
-                            status: 'running'
+                        // 将所有未跳过的 prompts 标记为 confirmed
+                        lastAssistantMsg.prompts.forEach(p => {
+                            if(p && typeof p === 'object' && p.status !== 'skipped'){
+                                p.status = 'confirmed';
+                            }
+                        });
+                        const confirmedPrompts = lastAssistantMsg.prompts.filter(p => p && typeof p === 'object' && p.status === 'confirmed');
+                        // 构建 generations（透传属性）
+                        lastAssistantMsg.generations = confirmedPrompts.map(p => ({
+                            prompt:p.prompt,
+                            count:p.count || 1,
+                            use_last_outputs:!!p.use_last_outputs,
+                            use_attachments:!!p.use_attachments,
+                            results:[],
+                            status:'running'
                         }));
                     }
                     if(lastAssistantMsg.generations?.length){
@@ -17266,9 +17384,12 @@ function renderAgentMessages(){
                     }
                 }
             } else {
-                // 发送文本给 LLM（重新生成提示词）
+                // 发送文本给 LLM，补全原始请求上下文（带数量信息）
+                const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+                const originalRequest = lastUserMsg ? String(lastUserMsg.text || '').trim() : '';
+                const sendText = originalRequest && originalRequest !== value ? `${originalRequest}，选择：${value}` : value;
                 if(agentInput){
-                    agentInput.value = value;
+                    agentInput.value = sendText;
                     agentInput.focus();
                 }
                 sendAgentMessage();
@@ -17280,14 +17401,31 @@ function renderAgentMessages(){
         btn.disabled = agentSending;
         btn.onclick = e => {
             e.stopPropagation();
-            if(agentSending) return;
+            if(agentSending && btn.dataset.agentPromptAction !== 'cancel-edit') return;
             const action = btn.dataset.agentPromptAction;
             const msgId = btn.dataset.agentPromptId;
             const msg = (agentState.messages || []).find(m => m.id === msgId);
             if(!msg) return;
             if(action === 'confirm') confirmAgentPrompt(msg);
+            else if(action === 'skip') skipAgentPrompt(msg);
             else if(action === 'regenerate') regenerateAgentPrompts(msg);
             else if(action === 'edit') editAgentPrompt(msg);
+            else if(action === 'save-edit') saveAgentPromptEdit(msg);
+            else if(action === 'cancel-edit') cancelAgentPromptEdit(msg);
+            else if(action === 'confirm-all') confirmAllAgentPrompts(msg);
+            else if(action === 'cancel-all') cancelAllAgentPrompts(msg);
+        };
+    });
+    // 绑定已确认/已跳过项的点击反悔事件
+    agentMessages.querySelectorAll('[data-agent-prompt-reopen]').forEach(item => {
+        item.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const msgId = item.dataset.agentPromptReopen;
+            const idx = Number(item.dataset.agentPromptIndex);
+            const msg = (agentState.messages || []).find(m => m.id === msgId);
+            if(!msg) return;
+            reopenAgentPrompt(msg, idx);
         };
     });
     // 绑定生成图片点击跳转事件
@@ -17478,14 +17616,49 @@ function agentRetryMessage(msgId){
     if(agentInput) agentInput.value = userMsg.text || '';
     sendAgentMessage();
 }
-function agentSystemPrompt(){
+function agentSystemPrompt(bypassThinking){
     const parts = [];
     const skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+    const hasSkills = skills.length > 0;
     skills.forEach(skill => {
         const text = String(skill?.content || '').trim();
         if(text) parts.push(`Follow this skill document "${skill.name}" closely:${AGENT_NL}${AGENT_NL}${text}`);
     });
     parts.push(AGENT_FORMAT_INSTRUCTION);
+    // 注入用户在工具栏设置的生图数量，让 LLM 知道用户想要几张图
+    const genCount = Math.max(1, Math.min(8, Number(agentState?.genCount) || 1));
+    if(genCount > 1){
+        parts.push(`用户在工具栏设置了生图数量为 ${genCount} 张。除非用户在消息中明确指定了其他数量，否则请按照 ${genCount} 张来生成。每张图应有不同的创意方向或变体。`);
+    }
+    // 有 skill 时的核心规则：必须完整保留 skill 内容
+    if(hasSkills){
+        parts.push(`【最重要规则 - skill 完整保留】
+当有 skill 文档时，你生成的每一条 prompt 都必须完整、逐字保留 skill 文档中的核心描述内容，包括但不限于：画面风格、背景描述、构图布局、配色要求、文字排版、图形风格、质量要求等所有细节。
+你只能在"品牌主题/主体内容/变体方向"上做差异化，绝不能简化、改写、概括或丢失 skill 中的任何风格描述。
+正确做法：把 skill 文档的完整描述作为每条 prompt 的主体，然后在末尾或开头添加变体差异（如不同的品牌主题、不同的行业方向）。
+错误做法：只提取 skill 的部分内容、用自己的话概括、只写一个简短的 prompt 而忽略 skill 的详细描述。
+生成的每条 prompt 长度应该与 skill 文档本身相当，而不是简短的一句话。`);
+    }
+    // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令
+    const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
+    if(thinkingModeOn){
+        parts.push(`当前为思维模式。请只返回 prompts 数组（不要返回 generations 数组）。
+
+重要规则：
+1. 每个 prompt 对象的 count 固定为 1。不要在单个 prompt 中用 count>1 来生成多张图。
+2. 用户请求N张图时，prompts 数组必须返回恰好N条不同的 prompt（每条 count=1），让用户逐个确认。
+   例如用户说"生成4张龙"，prompts 必须返回4条不同的龙的提示词（水墨龙、油画龙、赛博龙、Q版龙等）。
+   如果用户在工具栏设置了数量（如上方提到的），也按该数量返回 prompts。
+3. 每个 prompt 对象包含：prompt(中文提示词), count(固定为1), use_last_outputs(bool), use_attachments(bool)。
+4. 用户会逐个确认后才统一生图，所以每条 prompt 都应该是完整、独立、可单独生成的。
+   即使 skill 文档中描述的是"生成一张展示图/合集图"，在思维模式下也要拆成多条独立的 prompt（每条生成一张独立的图），
+   而不是只返回1条 prompt。如果 skill 明确要求生成合集图且用户只想要1张，用户会在消息中说明。
+   ${hasSkills ? '每条 prompt 都必须完整包含 skill 文档的所有描述内容，只在主题/变体上做差异化（见上方"skill 完整保留"规则）。' : ''}
+5. 如果请求模糊，可以先返回 options 让用户选方向，下一轮再返回 prompts。
+6. 如果是修改请求（"换成像素风"），仍返回 prompts，但 use_last_outputs 设为 true。`);
+    } else {
+        parts.push(`当前为直接模式。能生成就生成，返回 generations 数组。${hasSkills ? '每条 prompt 必须完整包含 skill 文档的所有描述内容。' : ''}`);
+    }
     return parts.join(AGENT_NL + AGENT_NL);
 }
 function agentHistoryMessages(){
@@ -17593,10 +17766,7 @@ function parseAgentResponse(raw, lastUserText){
                 const numbered = extractNumberedOptions(reply);
                 if(numbered) options = numbered.options;
             }
-            const prompts = (Array.isArray(data.prompts) ? data.prompts : [])
-                .filter(p => typeof p === 'string' && p.trim())
-                .slice(0, AGENT_GEN_MAX_PER_MSG)
-                .map(p => p.trim());
+            const prompts = normalizePrompts(data.prompts).slice(0, AGENT_GEN_MAX_PER_MSG);
             const generations = (Array.isArray(data.generations) ? data.generations : [])
                 .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
                 .slice(0, AGENT_GEN_MAX_PER_MSG)
@@ -17662,8 +17832,8 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
                     }
                 }
             }
-            if(parsed.generations.length === 0){
-                // 场景A：LLM 没返回 generations，需要兜底构造
+            if(parsed.generations.length === 0 && parsed.prompts.length === 0){
+                // 场景A：LLM 没返回 generations 也没返回 prompts，需要兜底构造
                 const genInProgressRe = /正在生成|正在为你生成|正在为您生成|生成中|开始生成|马上生成|这就为你生成|这就为您生成|好的[,，]?\s*我来生成|好的[,，]?\s*马上|我将为你生成|我将为您生成|我来为你生成|我来为您生成|正在为你创建|正在为您创建|正在画|正在创建/i;
                 const userGenIntentRe = /我要生成|帮我生成|帮我画|画一|生成一|创建一|制作一|来一张|来幅|来张|给我画|给我生成|帮我创建|帮我做/i;
                 const meaninglessConfirmRe = /确认要生成|确认生成|确认要画|要为您生成.*吗|要生成.*吗|确认.*吗.*[？?]/i;
@@ -17688,7 +17858,7 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
                         // 不覆盖 parsed.reply，保留 LLM 原始回复
                         // generation card 会独立显示状态和 prompt
                     }
-            } else if(isModifyScenario){
+            } else if(isModifyScenario && parsed.generations.length > 0){
                 // 场景B：LLM 返回了 generations。
                 // 不再盲目强制 use_last_outputs: true —— LLM 会根据系统提示词区分：
                 //   风格修改（use_last_outputs: true）vs 主体更换（use_last_outputs: false）
@@ -17706,29 +17876,107 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
     if(lastUserMsg && String(lastUserMsg.text || '').includes('重新生成提示词')){
         parsed.generations = [];
     }
-    // 批量完整性检查
-    const requestedCount = chatRequestedImageCount(text);
-    if(requestedCount > 0 && parsed.generations.length > 0 && parsed.generations.length < requestedCount){
-        parsed.reply += `${AGENT_NL}(注意：请求了 ${requestedCount} 张，但仅生成了 ${parsed.generations.length} 张的提示词)`;
+    // 批量完整性检查（P2-12：弱化为显示提示，不再强制追加 reply）
+    // 优先从文本解析数量，如果文本没有则回退到工具栏设置的 genCount
+    let requestedCount = chatRequestedImageCount(text);
+    if(!requestedCount){
+        requestedCount = Math.max(1, Math.min(8, Number(agentState?.genCount) || 1));
+        // 如果 genCount <= 1，相当于没有明确请求多张，设为 0 不触发数量逻辑
+        if(requestedCount <= 1) requestedCount = 0;
     }
     const bypassThinking = userMsg?.bypassThinking === true;
     const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
     if(thinkingModeOn){
         const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
         const isModifyRequest = userModifyRe.test(text);
-        if(!isModifyRequest){
-            if(parsed.generations.length > 0 && parsed.options.length === 0){
-                parsed.prompts = parsed.generations.map(g => String(g.prompt || '').trim()).filter(p => p);
-                parsed.generations = [];
+        // 思维模式下，无论是否修改请求，都走 prompts 确认流程
+        // 1. generations → prompts 转换（如果有 generations）
+        if(parsed.generations.length > 0 && parsed.options.length === 0){
+            // 将 generations 转为 prompts 对象数组（透传 count/use_last_outputs/use_attachments）
+            // 兜底：如果某个 generation 的 count>1，拆成多条 prompts（每条 count=1），确保用户逐个确认
+            // 保留 LLM 已返回的 prompts，只在前面追加转换结果
+            const convertedPrompts = [];
+            parsed.generations.forEach(g => {
+                const promptText = String(g.prompt || '').trim();
+                if(!promptText) return;
+                const c = Math.max(1, Math.min(8, Number(g.count) || 1));
+                for(let i = 0; i < c; i++){
+                    convertedPrompts.push({
+                        prompt:promptText,
+                        count:1,
+                        use_last_outputs:!!g.use_last_outputs,
+                        use_attachments:!!g.use_attachments,
+                        status:'pending'
+                    });
+                }
+            });
+            // 如果 LLM 同时返回了 prompts，合并（generations 转换的在前）
+            parsed.prompts = convertedPrompts.concat(parsed.prompts);
+            parsed.generations = [];
+        }
+        // 2. 如果 prompts 仍为空，创建默认 prompt
+        if(parsed.prompts.length === 0 && parsed.options.length === 0 && parsed.generations.length === 0){
+            parsed.prompts = [{prompt:text, count:1, use_last_outputs:isModifyRequest, use_attachments:false, status:'pending'}];
+            if(!parsed.reply) parsed.reply = '请确认以下提示词：';
+        }
+        // 3. 兜底：如果用户设置了 genCount>1 或文本请求了N张，但 LLM 只返回了少量 prompts，
+        // 自动补充到请求数量（复制并标注变体序号），确保用户能确认足够数量的图
+        if(requestedCount > 1 && parsed.prompts.length > 0 && parsed.prompts.length < requestedCount){
+            const basePrompts = parsed.prompts.slice();
+            while(parsed.prompts.length < requestedCount){
+                const base = basePrompts[parsed.prompts.length % basePrompts.length];
+                const variantIdx = Math.floor(parsed.prompts.length / basePrompts.length) + 1;
+                parsed.prompts.push({
+                    prompt: base.prompt + `（变体${variantIdx}）`,
+                    count: 1,
+                    use_last_outputs: base.use_last_outputs,
+                    use_attachments: base.use_attachments,
+                    status: 'pending'
+                });
             }
-            if(parsed.prompts.length === 0 && parsed.options.length === 0 && parsed.generations.length === 0){
-                parsed.prompts = [text];
-                if(!parsed.reply) parsed.reply = '请确认以下提示词：';
+        }
+    }
+    // 直接模式数量兜底：如果非思维模式且 generations 总数不足 requestedCount，补充到请求数量
+    if(!thinkingModeOn && requestedCount > 1 && parsed.generations.length > 0){
+        const currentTotal = parsed.generations.reduce((s, g) => s + (Math.max(1, Math.min(8, Number(g.count) || 1))), 0);
+        if(currentTotal < requestedCount){
+            // 优先增加现有 generation 的 count，直到达到 requestedCount
+            let need = requestedCount - currentTotal;
+            for(let i = 0; i < parsed.generations.length && need > 0; i++){
+                const g = parsed.generations[i];
+                const cur = Math.max(1, Math.min(8, Number(g.count) || 1));
+                const canAdd = Math.min(need, 8 - cur);
+                if(canAdd > 0){
+                    g.count = cur + canAdd;
+                    need -= canAdd;
+                }
+            }
+            // 如果所有 generation 都到上限8还不够，追加新的 generation
+            while(need > 0){
+                const base = parsed.generations[parsed.generations.length % parsed.generations.length];
+                const add = Math.min(need, 8);
+                parsed.generations.push({
+                    prompt: String(base.prompt || text || '') + `（变体${Math.floor(parsed.generations.length / (parsed.generations.length || 1)) + 1}）`,
+                    count: add,
+                    use_last_outputs: !!base.use_last_outputs,
+                    use_attachments: !!base.use_attachments,
+                    results: [],
+                    status: 'running'
+                });
+                need -= add;
             }
         }
     }
     const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
-    if(assistantMsg.prompts.length > 0) assistantMsg.promptIdx = 0;
+    // P2-12: 记录请求数量到消息，用于卡片显示校验
+    if(requestedCount > 0) assistantMsg.requestedCount = requestedCount;
+    if(assistantMsg.prompts.length > 0){
+        assistantMsg.promptIdx = 0;
+        // 设置第一个 prompt 为 current
+        if(!assistantMsg.prompts[0].status || assistantMsg.prompts[0].status === 'pending'){
+            assistantMsg.prompts[0].status = 'current';
+        }
+    }
     agentState.messages.push(assistantMsg);
     agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
     agentThinking = false;
@@ -17738,6 +17986,23 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
 }
 async function sendAgentMessage(){
     if(agentSending || !agentState) return;
+    // P2-14: 确认中发送新消息拦截 —— 检测有未完成的 prompts 时弹 toast
+    {
+        const lastAssistant = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant');
+        if(lastAssistant && Array.isArray(lastAssistant.prompts) && lastAssistant.prompts.length > 0){
+            const pendingCount = lastAssistant.prompts.filter(p => p.status === 'pending' || p.status === 'current' || p.status === 'editing').length;
+            if(pendingCount > 0){
+                if(!confirm(`还有 ${pendingCount} 条提示词未确认，是否放弃当前确认并发送新消息？`)){
+                    return;
+                }
+                // 用户确认放弃 → 清除当前 prompts
+                lastAssistant.prompts = [];
+                delete lastAssistant.promptIdx;
+                renderAgentMessages();
+                saveAgentState();
+            }
+        }
+    }
     const text = String(agentInput?.value || '').trim();
     const attachments = (Array.isArray(agentState.attachments) ? agentState.attachments : []).slice();
     if(!text && !attachments.length) return;
@@ -17885,32 +18150,155 @@ function agentPendingBoxSize(count, options={}){
     const h = rows * (cellH + 8) + 16;
     return {w, h};
 }
-// 确认当前提示词：创建 generation 并运行，然后展示下一个提示词
-async function confirmAgentPrompt(assistantMsg){
-    const idx = assistantMsg.promptIdx || 0;
+// 检查是否所有 prompts 都已处理完（无 pending/current/editing），如是则构建 generations 并统一生图
+async function _triggerGenerationsIfAllDone(assistantMsg){
     const prompts = assistantMsg.prompts || [];
-    if(idx >= prompts.length) return;
-    const prompt = prompts[idx];
-    // 找到对应的用户消息（用于 use_attachments 判断）
+    // 还有未处理的 prompt，不触发
+    if(prompts.some(p => p.status === 'pending' || p.status === 'current' || p.status === 'editing')) return;
+    // 收集 confirmed 的 prompts
+    const confirmedPrompts = prompts.filter(p => p.status === 'confirmed');
+    if(confirmedPrompts.length === 0) return; // 全部跳过，不生图
+    // 找到对应的用户消息
     const msgs = agentState.messages || [];
     const msgIdx = msgs.indexOf(assistantMsg);
     let userMsg = null;
     for(let i = msgIdx - 1; i >= 0; i--){
         if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
     }
-    // 创建 generation 并运行
-    const gen = {prompt, count:1, use_last_outputs:false, use_attachments:!!(userMsg?.images?.length), results:[], status:'running'};
+    // 构建 generations（透传 LLM 返回的 count/use_last_outputs/use_attachments）
     if(!Array.isArray(assistantMsg.generations)) assistantMsg.generations = [];
-    assistantMsg.generations.push(gen);
-    // 推进到下一个提示词
-    assistantMsg.promptIdx = idx + 1;
+    confirmedPrompts.forEach(cp => {
+        assistantMsg.generations.push({
+            prompt:cp.prompt,
+            count:cp.count || 1,
+            use_last_outputs:cp.use_last_outputs || false,
+            use_attachments:cp.use_attachments || false,
+            results:[],
+            status:'running'
+        });
+    });
+    // 统一生图（所有 confirmed prompts 一次性传入，整齐排列）
+    await runAgentGenerations(assistantMsg, userMsg);
+}
+// 推进到下一个 pending prompt，如果全部处理完则触发生图
+async function _advanceToNextOrGenerate(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const nextIdx = prompts.findIndex(p => p.status === 'pending');
+    if(nextIdx >= 0){
+        prompts[nextIdx].status = 'current';
+        assistantMsg.promptIdx = nextIdx;
+        renderAgentMessages();
+        saveAgentState();
+        return;
+    }
+    // 没有 pending 了 → 全部处理完，触发生图
+    assistantMsg.promptIdx = prompts.length;
     renderAgentMessages();
     saveAgentState();
-    // 运行生图（异步，不阻塞下一个提示词的展示）
-    runAgentGenerations(assistantMsg, userMsg);
+    await _triggerGenerationsIfAllDone(assistantMsg);
 }
-// 重新生成提示词：重新发送原始用户消息给 LLM
+// 确认当前提示词：标记为 confirmed，推进到下一个 pending，全部处理完才生图
+async function confirmAgentPrompt(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
+    if(idx < 0) return;
+    prompts[idx].status = 'confirmed';
+    await _advanceToNextOrGenerate(assistantMsg);
+}
+// 跳过当前提示词：标记为 skipped，推进到下一个 pending
+async function skipAgentPrompt(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
+    if(idx < 0) return;
+    prompts[idx].status = 'skipped';
+    await _advanceToNextOrGenerate(assistantMsg);
+}
+// 修改提示词：进入内联编辑模式（不跳出确认流程，不设置 bypass 标志）
+function editAgentPrompt(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'current');
+    if(idx < 0) return;
+    prompts[idx].status = 'editing';
+    assistantMsg.promptIdx = idx;
+    renderAgentMessages();
+    saveAgentState();
+    // 聚焦到 textarea
+    const ta = agentMessages?.querySelector('textarea[data-agent-prompt-edit]');
+    if(ta){
+        ta.focus();
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+    }
+}
+// 保存内联编辑的提示词：更新文本，标记为 confirmed，推进到下一个
+async function saveAgentPromptEdit(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'editing');
+    if(idx < 0) return;
+    const ta = agentMessages?.querySelector('textarea[data-agent-prompt-edit]');
+    const newText = ta ? String(ta.value || '').trim() : '';
+    if(!newText){
+        toast('提示词不能为空');
+        return;
+    }
+    prompts[idx].prompt = newText;
+    prompts[idx].status = 'confirmed';
+    await _advanceToNextOrGenerate(assistantMsg);
+}
+// 取消内联编辑：恢复为 current 状态
+function cancelAgentPromptEdit(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const idx = prompts.findIndex(p => p.status === 'editing');
+    if(idx < 0) return;
+    prompts[idx].status = 'current';
+    renderAgentMessages();
+    saveAgentState();
+}
+// P1-7: 全部确认并生成：将所有未跳过的 prompts 标记为 confirmed，触发生图
+async function confirmAllAgentPrompts(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    if(!prompts.length) return;
+    // 将所有 pending/current/editing 的标记为 confirmed（保留 skipped）
+    prompts.forEach(p => {
+        if(p.status !== 'skipped' && p.status !== 'confirmed'){
+            p.status = 'confirmed';
+        }
+    });
+    // 清除 current 指针
+    assistantMsg.promptIdx = prompts.length;
+    renderAgentMessages();
+    saveAgentState();
+    await _triggerGenerationsIfAllDone(assistantMsg);
+}
+// P2-15: 全部取消：清除当前 assistant 消息的 prompts，不触发生图
+function cancelAllAgentPrompts(assistantMsg){
+    assistantMsg.prompts = [];
+    delete assistantMsg.promptIdx;
+    if(!assistantMsg.text) assistantMsg.text = '已取消全部提示词，请重新输入需求。';
+    renderAgentMessages();
+    saveAgentState();
+}
+// P2-13: 已确认/已跳过项反悔：改回 pending 并设为 current
+function reopenAgentPrompt(assistantMsg, idx){
+    const prompts = assistantMsg.prompts || [];
+    if(idx < 0 || idx >= prompts.length) return;
+    // 如果有正在编辑的，不允许反悔（避免状态混乱）
+    if(prompts.some(p => p.status === 'editing' || p.status === 'current')){
+        toast('请先完成当前提示词的确认或修改');
+        return;
+    }
+    prompts[idx].status = 'current';
+    assistantMsg.promptIdx = idx;
+    renderAgentMessages();
+    saveAgentState();
+}
+// 重新生成当前提示词：只重新生成当前这一条，不影响其他已确认的
 async function regenerateAgentPrompts(assistantMsg){
+    const prompts = assistantMsg.prompts || [];
+    const currentIdx = prompts.findIndex(p => p.status === 'current' || p.status === 'editing');
+    if(currentIdx < 0) return;
+    const currentPrompt = prompts[currentIdx];
+    // 找到对应的原始用户消息
     const msgs = agentState.messages || [];
     const msgIdx = msgs.indexOf(assistantMsg);
     let originalUserText = '';
@@ -17928,8 +18316,9 @@ async function regenerateAgentPrompts(assistantMsg){
     agentSending = true;
     agentThinking = true;
     renderAgentMessages();
+    const regenMessage = originalUserText + AGENT_NL + AGENT_NL + `请重新生成第${currentIdx + 1}条提示词，要求与之前不同。当前第${currentIdx + 1}条是："${currentPrompt.prompt}"。请只返回一条新的提示词。`;
     const llmPayload = {
-        message: originalUserText + '\n\n请重新生成不同方向的提示词，与之前的提示词有所区别。',
+        message: regenMessage,
         messages: agentHistoryMessages().slice(0, -1),
         images: userMsg?.images ? userMsg.images.map(i => i.url) : [],
         videos: [],
@@ -17949,16 +18338,32 @@ async function regenerateAgentPrompts(assistantMsg){
         });
         const result = await pollAgentLlmTask(taskRes.task_id);
         const parsed = parseAgentResponse(result.text || '', originalUserText);
-        // 替换当前消息的 prompts
-        assistantMsg.prompts = parsed.prompts && parsed.prompts.length > 0 ? parsed.prompts : (parsed.generations && parsed.generations.length > 0 ? parsed.generations.map(g => g.prompt) : [originalUserText]);
-        assistantMsg.promptIdx = 0;
-        if(parsed.reply) assistantMsg.text = parsed.reply;
-        if(parsed.options && parsed.options.length > 0){
-            assistantMsg.options = parsed.options;
-            assistantMsg.prompts = [];
-        } else {
-            assistantMsg.options = [];
+        // 提取新提示词文本和属性
+        let newPromptText = '';
+        let newCount = currentPrompt.count;
+        let newUseLast = currentPrompt.use_last_outputs;
+        let newUseAttach = currentPrompt.use_attachments;
+        if(parsed.prompts && parsed.prompts.length > 0){
+            const first = parsed.prompts[0];
+            newPromptText = first.prompt || '';
+            if(first.count !== undefined) newCount = first.count;
+            if(first.use_last_outputs !== undefined) newUseLast = !!first.use_last_outputs;
+            if(first.use_attachments !== undefined) newUseAttach = !!first.use_attachments;
+        } else if(parsed.generations && parsed.generations.length > 0){
+            const first = parsed.generations[0];
+            newPromptText = first.prompt || '';
+            if(first.count !== undefined) newCount = first.count;
+            if(first.use_last_outputs !== undefined) newUseLast = !!first.use_last_outputs;
+            if(first.use_attachments !== undefined) newUseAttach = !!first.use_attachments;
         }
+        if(newPromptText.trim()){
+            prompts[currentIdx].prompt = newPromptText.trim();
+            prompts[currentIdx].count = newCount;
+            prompts[currentIdx].use_last_outputs = newUseLast;
+            prompts[currentIdx].use_attachments = newUseAttach;
+            // 保持 status 为 current（用户继续确认）
+        }
+        if(parsed.reply) assistantMsg.text = parsed.reply;
     } catch(e) {
         assistantMsg.text = `⚠️ ${String(e.message || e).slice(0, 300)}`;
     } finally {
@@ -17967,26 +18372,6 @@ async function regenerateAgentPrompts(assistantMsg){
         renderAgentMessages();
         saveAgentState();
     }
-}
-// 修改提示词：复制到输入框，设置绕过标志
-function editAgentPrompt(assistantMsg){
-    const idx = assistantMsg.promptIdx || 0;
-    const prompts = assistantMsg.prompts || [];
-    if(idx >= prompts.length) return;
-    const prompt = prompts[idx];
-    if(agentInput){
-        agentInput.value = prompt;
-        agentInput.focus();
-        // 自动调整高度
-        agentInput.style.height = 'auto';
-        agentInput.style.height = Math.min(agentInput.scrollHeight, 200) + 'px';
-    }
-    // 设置绕过标志：下次发送时不走思维模式，直接生图
-    agentBypassThinkingNext = true;
-    // 标记当前提示词已处理（用户选择了修改，不再显示）
-    assistantMsg.promptIdx = (assistantMsg.promptIdx || 0) + 1;
-    renderAgentMessages();
-    saveAgentState();
 }
 async function runAgentGenerations(assistantMsg, userMsg){
     const gens = assistantMsg.generations || [];
@@ -18008,19 +18393,18 @@ async function runAgentGenerations(assistantMsg, userMsg){
     const lastResults = agentLastResults();
     const currentAttach = (userMsg?.images || []).filter(i => i?.url);
     const attachRefs = currentAttach.length ? currentAttach : agentLastUserAttachments();
-    await Promise.all(gens.filter(gen => !(gen.results && gen.results.length) && gen.status !== 'done' && gen.status !== 'error').map(async gen => {
+    // 第一步：串行创建所有占位节点（确保位置不重叠、顶部对齐）
+    const pendingGens = gens.filter(gen => !(gen.results && gen.results.length) && gen.status !== 'done' && gen.status !== 'error');
+    const placeholders = [];
+    for(const gen of pendingGens){
         gen.status = 'running';
-        renderAgentMessages();
-        // 先创建占位节点（复用主画布的 pendingBoxSize 逻辑，按当前选择的比例动态计算）
         const pos = agentFindEmptyPosition(gen.count);
         const placeholderNode = createImageNodeAt(pos, []);
         if(placeholderNode){
             placeholderNode.pending = gen.count;
             placeholderNode.title = gen.prompt?.slice(0, 30) || '生成中...';
-            // 修复：设置计时开始时间，使占位节点显示正计时
             placeholderNode.runStartedAt = nowMs();
             placeholderNode.runTimerHidden = false;
-            // 修复：按当前选择的比例设置占位节点尺寸（复用主画布逻辑）
             let refsForBox = [];
             if(gen.use_last_outputs) refsForBox = refsForBox.concat(lastResults);
             if(gen.use_attachments) refsForBox = refsForBox.concat(attachRefs);
@@ -18028,8 +18412,8 @@ async function runAgentGenerations(assistantMsg, userMsg){
             const pendingBox = agentPendingBoxSize(gen.count, {refs: refsForBox});
             placeholderNode.w = pendingBox.w;
             placeholderNode.h = pendingBox.h;
-            // 修复：顶部对齐 — 找到已有图片节点的最小顶部 y，将占位节点顶部对齐
-            const existingNodes = (nodes || []).filter(n => isSmartImageNode(n) && n.id !== placeholderNode.id && (n.images || []).some(img => img?.url));
+            // 顶部对齐 — 找到已有图片节点和已创建的 pending 占位节点的最小顶部 y
+            const existingNodes = (nodes || []).filter(n => isSmartImageNode(n) && n.id !== placeholderNode.id && ((n.images || []).some(img => img?.url) || Number(n.pending) > 0));
             if(existingNodes.length){
                 let topY = Infinity;
                 existingNodes.forEach(n => { const r = nodeRect(n); if(r.y < topY) topY = r.y; });
@@ -18037,6 +18421,11 @@ async function runAgentGenerations(assistantMsg, userMsg){
             }
             render();
         }
+        placeholders.push({gen, placeholderNode});
+    }
+    renderAgentMessages();
+    // 第二步：并行发起所有生图请求
+    await Promise.all(placeholders.map(async ({gen, placeholderNode}) => {
         try {
             let refs = [];
             if(gen.use_last_outputs) refs = refs.concat(lastResults);
@@ -18048,7 +18437,6 @@ async function runAgentGenerations(assistantMsg, userMsg){
                 return r.json();
             })));
             const imageTaskIds = tasks.map(t => t.task_id).filter(Boolean);
-            // 保存 task IDs 和 placeholderNodeId，以便刷新恢复
             gen.taskIds = imageTaskIds;
             if(placeholderNode) gen.placeholderNodeId = placeholderNode.id;
             saveAgentState();
@@ -18060,26 +18448,21 @@ async function runAgentGenerations(assistantMsg, userMsg){
             gen.results = urls;
             gen.status = 'done';
             if(urls.length && placeholderNode){
-                // 生成完成后，更新占位节点为实际图片
                 undoSuppressed = true;
                 placeholderNode.images = urls.map(u => ({...u}));
                 placeholderNode.pending = 0;
                 placeholderNode.title = urls.length > 1 ? 'Group' : 'Image';
-                // 修复：设置计时结束时间
                 placeholderNode.runFinishedAt = nowMs();
-                // 修复：删除占位尺寸，让节点根据实际图片自然尺寸重新计算（和主画布 finalizePendingNode 一致）
                 placeholderNode.scale = mediaNodeDefaultScale(placeholderNode);
                 delete placeholderNode.w;
                 delete placeholderNode.h;
                 selectedId = placeholderNode.id;
                 undoSuppressed = false;
-                // 保存节点 ID 到 results，用于点击跳转
                 gen.results = gen.results.map((r, i) => ({...r, nodeId: placeholderNode.id, nodeX: Number(placeholderNode.x) || 0, nodeY: Number(placeholderNode.y) || 0}));
             }
         } catch(e) {
             gen.status = 'error';
             gen.error = String(e.message || e).slice(0, 200);
-            // 生成失败，删除占位节点
             if(placeholderNode){
                 undoSuppressed = true;
                 nodes = nodes.filter(n => n.id !== placeholderNode.id);
