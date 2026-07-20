@@ -17957,7 +17957,15 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
     // 批量完整性检查（P2-12：弱化为显示提示，不再强制追加 reply）
     // 前端数量决策：输入框显式要求 > 工具栏设置（与 sendAgentMessage 一致）
     // 优先用 sendAgentMessage 已存入 userMsg 的值，避免重复计算导致不一致
-    let requestedCount = userMsg?.requestedCount || resolveFinalGenCount(text).count;
+    let requestedCount = userMsg?.requestedCount || 0;
+    // 阶段二继承：如果 userMsg 没有 requestedCount，从上一条 user 消息继承
+    if(requestedCount <= 1){
+        const _prevUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+        if(_prevUserMsg?.requestedCount > 1){
+            requestedCount = _prevUserMsg.requestedCount;
+        }
+    }
+    if(requestedCount <= 1) requestedCount = resolveFinalGenCount(text).count;
     // 如果最终数量 <= 1，相当于没有明确请求多张，设为 0 不触发数量逻辑
     if(requestedCount <= 1) requestedCount = 0;
     if(thinkingModeOn){
@@ -18008,14 +18016,20 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
             if(!parsed.reply) parsed.reply = '请确认以下提示词：';
         }
         // 3. 数量校准：如果用户设置了 genCount>1 或文本请求了N张
-        // 3a. 少于请求数量 → 补充
+        // 3a. 少于请求数量 → 补充（加入差异化方向，避免生成的图几乎一样）
         if(requestedCount > 1 && parsed.prompts.length > 0 && parsed.prompts.length < requestedCount){
             const basePrompts = parsed.prompts.slice();
+            const variantDirections = [
+                '不同姿态与动作', '不同场景与氛围', '不同视角与构图',
+                '不同配色与光线', '不同细节与装饰', '不同表情与神态',
+                '不同背景与环境', '不同材质与质感'
+            ];
             while(parsed.prompts.length < requestedCount){
                 const base = basePrompts[parsed.prompts.length % basePrompts.length];
-                const variantIdx = Math.floor(parsed.prompts.length / basePrompts.length) + 1;
+                const variantIdx = Math.floor(parsed.prompts.length / basePrompts.length);
+                const direction = variantDirections[variantIdx % variantDirections.length];
                 parsed.prompts.push({
-                    prompt: base.prompt + `（变体${variantIdx}）`,
+                    prompt: base.prompt + `（变体${variantIdx + 1}，${direction}）`,
                     count: 1,
                     use_last_outputs: base.use_last_outputs,
                     use_attachments: base.use_attachments,
@@ -18133,6 +18147,15 @@ async function sendAgentMessage(){
     let messageText = text || '(please help me edit these images)';
     // 前端数量决策：输入框显式要求 > 工具栏设置（软参数覆盖）
     const _finalCount = resolveFinalGenCount(text);
+    // 阶段二继承：如果当前没有明确请求多张，但上一条 user 消息有 requestedCount，继承它
+    // 这确保阶段二（选风格后）和阶段一的数量一致
+    if(_finalCount.count <= 1){
+        const _prevUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
+        if(_prevUserMsg?.requestedCount > 1){
+            _finalCount.count = _prevUserMsg.requestedCount;
+            _finalCount.source = 'inherited';
+        }
+    }
     if(_finalCount.count > 1) userMsg.requestedCount = _finalCount.count;
     const _skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
     if(_skills.length > 0){
@@ -18271,17 +18294,15 @@ async function _triggerGenerationsIfAllDone(assistantMsg){
         if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
     }
     // 构建 generations（透传 LLM 返回的 count/use_last_outputs/use_attachments）
-    if(!Array.isArray(assistantMsg.generations)) assistantMsg.generations = [];
-    confirmedPrompts.forEach(cp => {
-        assistantMsg.generations.push({
-            prompt:cp.prompt,
-            count:cp.count || 1,
-            use_last_outputs:cp.use_last_outputs || false,
-            use_attachments:cp.use_attachments || false,
-            results:[],
-            status:'running'
-        });
-    });
+    // 用赋值而非 push，避免重复调用时 generations 重复追加
+    assistantMsg.generations = confirmedPrompts.map(cp => ({
+        prompt:cp.prompt,
+        count:cp.count || 1,
+        use_last_outputs:cp.use_last_outputs || false,
+        use_attachments:cp.use_attachments || false,
+        results:[],
+        status:'running'
+    }));
     // 统一生图（所有 confirmed prompts 一次性传入，整齐排列）
     await runAgentGenerations(assistantMsg, userMsg);
 }
