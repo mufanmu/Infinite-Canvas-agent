@@ -188,7 +188,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "2026.06.03"
+APP_VERSION = "2026.06.04"
 GITHUB_REPO_URL = "https://github.com/hero8152/Infinite-Canvas"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1"
@@ -7585,8 +7585,20 @@ def convert_output_to_jpg(url, quality=88):
         print(f"转换 JPG 失败: {e}")
         return url
 
+def ref_image_max_size(num_refs):
+    """根据参考图数量动态计算 max_size，控制总 payload 在 nginx 限制内。
+    nginx 默认 client_max_body_size=1MB，base64 膨胀 33%，需留余量。"""
+    if not num_refs or num_refs <= 1:
+        return 1536
+    if num_refs <= 3:
+        return 1024
+    if num_refs <= 6:
+        return 768
+    return 512
+
 def reference_to_data_url(ref, max_size=None):
-    """把本地输出文件转为 data URL（base64）。max_size 限制最长边像素，避免 payload 过大。"""
+    """把本地输出文件转为 data URL（base64）。max_size 限制最长边像素，避免 payload 过大。
+    始终使用 JPEG 格式（RGBA 合成到白底），避免 PNG 过大导致 413。"""
     path = output_file_from_url(ref.get("url", ""))
     if not path:
         return ref.get("url", "")
@@ -7597,19 +7609,55 @@ def reference_to_data_url(ref, max_size=None):
                 w, h = img.size
                 if max(w, h) > max_size:
                     img.thumbnail((max_size, max_size), Image.LANCZOS)
-                if img.mode not in ("RGB", "RGBA"):
+                # 始终转 RGB：RGBA 合成到白底，P/L 等模式直接转
+                if img.mode == "RGBA":
+                    bg = Image.new("RGB", img.size, (255, 255, 255))
+                    bg.paste(img, mask=img.split()[3])
+                    img = bg
+                elif img.mode != "RGB":
                     img = img.convert("RGB")
                 buf = BytesIO()
-                fmt = "PNG" if img.mode == "RGBA" else "JPEG"
-                img.save(buf, format=fmt, quality=88 if fmt == "JPEG" else None)
+                img.save(buf, format="JPEG", quality=85)
                 encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-                mime = "image/png" if fmt == "PNG" else "image/jpeg"
-                return f"data:{mime};base64,{encoded}"
+                return f"data:image/jpeg;base64,{encoded}"
         except Exception as e:
             print(f"reference resize failed, fallback to raw: {e}")
     with open(path, "rb") as f:
         encoded = base64.b64encode(f.read()).decode("ascii")
     return f"data:{content_type_for_path(path)};base64,{encoded}"
+
+def prepare_reference_for_multipart(ref, max_size=1536):
+    """准备参考图用于 multipart 上传。
+    图片 > max_size 时缩放到 max_size 并保存到临时文件（JPEG quality 88）。
+    图片 <= max_size 时返回原始路径（不压缩、不转码）。
+    返回 (path, cleanup_temp_path_or_None)。"""
+    raw_url = ref.get("url", "") if isinstance(ref, dict) else str(ref or "")
+    path = output_file_from_url(raw_url)
+    if not path:
+        return None, None
+    if not max_size:
+        return path, None
+    try:
+        with Image.open(path) as img:
+            img.load()
+            w, h = img.size
+            if max(w, h) <= max_size:
+                return path, None
+            img.thumbnail((max_size, max_size), Image.LANCZOS)
+            # 始终转 RGB：RGBA 合成到白底，避免 PNG 过大
+            if img.mode == "RGBA":
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[3])
+                img = bg
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg", prefix="ref_multipart_")
+            os.close(tmp_fd)
+            img.save(tmp_path, format="JPEG", quality=85)
+            return tmp_path, tmp_path
+    except Exception as e:
+        print(f"prepare_reference_for_multipart resize failed, fallback to raw: {e}")
+        return path, None
 
 def is_image_reference(ref):
     if not isinstance(ref, dict):
@@ -9238,11 +9286,13 @@ async def generate_modelscope_provider_image(prompt, size, model, reference_imag
         raise HTTPException(status_code=400, detail="未配置 ModelScope API Key，请在 API 设置中填写。")
     width, height = parse_size_pair(size)
     refs = []
-    for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
+    _ms_refs = (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
+    _ms_max = ref_image_max_size(len(_ms_refs))
+    for ref in _ms_refs:
         if not ref.get("url"):
             continue
         # 本地参考图转为 data URL；前端已生成的 data URL 保持原样，贴近旧版稳定链路。
-        refs.append(modelscope_image_url(ref.get("url", ""), max_size=1536))
+        refs.append(modelscope_image_url(ref.get("url", ""), max_size=_ms_max))
     headers = {
         "Authorization": f"Bearer {clean_token}",
         "Content-Type": "application/json",
@@ -9313,8 +9363,8 @@ def gemini_image_config(size):
     aspect_ratio, resolution = apimart_size_resolution(size)
     return {"aspectRatio": aspect_ratio, "imageSize": resolution.upper()}
 
-def gemini_reference_part(ref):
-    value = reference_to_data_url(ref, max_size=1536)
+def gemini_reference_part(ref, max_size=1536):
+    value = reference_to_data_url(ref, max_size=max_size)
     if not value:
         return None
     if isinstance(value, str) and value.startswith("data:image/") and ";base64," in value:
@@ -9329,8 +9379,10 @@ async def generate_gemini_provider_image(prompt, size, model, reference_images=N
     model_name = gemini_model_name(model)
     endpoint = gemini_endpoint_url(provider, model_name)
     parts = [{"text": prompt.strip()}]
-    for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
-        part = gemini_reference_part(ref)
+    _refs = (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
+    _max_sz = ref_image_max_size(len(_refs))
+    for ref in _refs:
+        part = gemini_reference_part(ref, max_size=_max_sz)
         if part:
             parts.append(part)
     body = {
@@ -9349,8 +9401,8 @@ async def generate_gemini_provider_image(prompt, size, model, reference_images=N
 def volcengine_endpoint_url(provider):
     return provider_endpoint_url(provider, "image_generation_endpoint", "/api/v3/images/generations")
 
-def volcengine_image_payload(ref):
-    value = reference_to_data_url(ref, max_size=1536)
+def volcengine_image_payload(ref, max_size=1536):
+    value = reference_to_data_url(ref, max_size=max_size)
     if not value:
         return None
     return value
@@ -9364,7 +9416,9 @@ async def generate_volcengine_provider_image(prompt, size, model, reference_imag
         "size": size,
         "response_format": "url",
     }
-    images = [volcengine_image_payload(ref) for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]]
+    _vrefs = (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
+    _vmax = ref_image_max_size(len(_vrefs))
+    images = [volcengine_image_payload(ref, max_size=_vmax) for ref in _vrefs]
     images = [value for value in images if value]
     if images:
         body["image"] = images
@@ -10661,7 +10715,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             # 文生图只传 extra_body.response_format，图生图把参考图放进 extra_body.image。
             extra_body = {"response_format": "url"}
             if image_refs:
-                extra_body["image"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                _ojson_refs = image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
+                extra_body["image"] = [reference_to_data_url(ref, max_size=ref_image_max_size(len(_ojson_refs))) for ref in _ojson_refs]
             body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_apimart:
@@ -10677,7 +10732,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                 "official_fallback": False,
             }
             if image_refs:
-                body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                _apimart_refs = image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
+                body["image_urls"] = [reference_to_data_url(ref, max_size=ref_image_max_size(len(_apimart_refs))) for ref in _apimart_refs]
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_gpt2 and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
@@ -10691,16 +10747,19 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             # GPT-Image-2 参考图不能走 /images/generations JSON，否则部分平台会忽略原图或报 Images API unsupported。
             files = []
             opened = []
+            temp_paths = []
             edit_failed_status = None
             edit_failed_text = ""
             try:
                 for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
-                    path = output_file_from_url(ref.get("url", ""))
-                    if not path:
+                    ref_path, tmp_cleanup = prepare_reference_for_multipart(ref, max_size=1536)
+                    if not ref_path:
                         continue
-                    fh = open(path, "rb")
+                    if tmp_cleanup:
+                        temp_paths.append(tmp_cleanup)
+                    fh = open(ref_path, "rb")
                     opened.append(fh)
-                    files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
+                    files.append(("image", (os.path.basename(ref_path), fh, content_type_for_path(ref_path))))
                 if mask_refs:
                     mask_path = output_file_from_url(mask_refs[0].get("url", ""))
                     if mask_path:
@@ -10720,6 +10779,11 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             finally:
                 for fh in opened:
                     fh.close()
+                for tp in temp_paths:
+                    try:
+                        os.unlink(tp)
+                    except Exception:
+                        pass
             # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
             if response is None:
                 if is_gpt2:
@@ -10728,7 +10792,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                         detail=f"GPT-Image-2 编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
                     )
                 print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
-                image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                _fallback_refs = image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
+                image_payload = [reference_to_data_url(ref, max_size=ref_image_max_size(len(_fallback_refs))) for ref in _fallback_refs]
                 body = {
                     "model": model, "prompt": prompt, "size": size,
                     "response_format": "url", "n": 1,
@@ -14484,7 +14549,9 @@ async def canvas_video(payload: CanvasVideoRequest):
                     # enable_upsample / aspect_ratio（仅 16:9、9:16）。无 duration 字段，
                     # 时长由模型本身决定，所以这里不传 duration/seconds。
                     yuli_images = []
-                    for ref in payload.images[:3]:
+                    _veo_refs = payload.images[:3]
+                    _veo_max = ref_image_max_size(len(_veo_refs))
+                    for ref in _veo_refs:
                         ref_url = str(getattr(ref, "url", "") or "").strip()
                         if not ref_url:
                             continue
@@ -14492,7 +14559,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                             yuli_images.append(ref_url)
                         else:
                             # 本地/dataURL 图片转成 data URL 兜底传递
-                            data_url = reference_to_data_url(ref.dict(), max_size=1536)
+                            data_url = reference_to_data_url(ref.dict(), max_size=_veo_max)
                             if data_url:
                                 yuli_images.append(data_url)
                     prompt_text = str(payload.prompt or "")
@@ -14512,10 +14579,12 @@ async def canvas_video(payload: CanvasVideoRequest):
                     if payload.enable_upsample:
                         body["enable_upsample"] = True
                 else:
+                    _veo3_refs = payload.images[:4]
+                    _veo3_max = ref_image_max_size(len(_veo3_refs))
                     image_payload = []
-                    for ref in payload.images[:4]:
+                    for ref in _veo3_refs:
                         if ref.url:
-                            image_payload.append(reference_to_data_url(ref.dict(), max_size=1536))
+                            image_payload.append(reference_to_data_url(ref.dict(), max_size=_veo3_max))
                     body = {
                         "prompt": payload.prompt,
                         "model": selected_model(payload.model, "veo3-fast"),
@@ -16564,7 +16633,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
     payload = {
         "model": model,
         "prompt": req.prompt.strip(),
-        "image_url": [modelscope_image_url(url, max_size=1536) for url in req.image_urls]
+        "image_url": [modelscope_image_url(url, max_size=ref_image_max_size(len(req.image_urls))) for url in req.image_urls]
     }
     if req.resolution:
         payload["size"] = modelscope_size(req.resolution)
@@ -16754,7 +16823,8 @@ async def ms_generate(req: MsGenerateRequest):
     elif req.size:
         payload["size"] = modelscope_size(req.size)
     if req.image_urls:
-        payload["image_url"] = [modelscope_image_url(url, max_size=1536) for url in req.image_urls]
+        _ms_urls = req.image_urls
+        payload["image_url"] = [modelscope_image_url(url, max_size=ref_image_max_size(len(_ms_urls))) for url in _ms_urls]
     if req.loras is not None:
         payload["loras"] = req.loras
 

@@ -1325,11 +1325,35 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-attach-chip { position:relative; width:44px; height:44px; border-radius:10px; overflow:hidden; border:1px solid var(--line); cursor:pointer; transition:border-color .14s ease; }
 .agent-attach-chip:hover { border-color:var(--strong); }
 .agent-attach-chip img { width:100%; height:100%; object-fit:cover; display:block; }
+.agent-att-num { position:absolute; top:2px; left:2px; min-width:14px; height:14px; border-radius:7px; background:rgba(15,23,42,.82); color:#fff; font-size:9px; font-weight:600; line-height:14px; text-align:center; padding:0 3px; z-index:2; pointer-events:none; }
 .agent-attach-chip button { position:absolute; top:2px; right:2px; width:15px; height:15px; border-radius:50%; background:rgba(15,23,42,.78); color:#fff; display:flex; align-items:center; justify-content:center; border:none; cursor:pointer; padding:0; }
 .agent-attach-chip button i,.agent-attach-chip button svg { width:9px; height:9px; }
 .agent-attach-chip.dragging { opacity:.4; }
 .agent-attach-chip.drop-before { box-shadow:-2px 0 0 0 var(--strong); }
 .agent-attach-chip.drop-after { box-shadow:2px 0 0 0 var(--strong); }
+.agent-ref-confirm { position:absolute; bottom:100%; left:0; right:0; margin-bottom:6px; background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:0 -4px 24px rgba(0,0,0,.12); z-index:50; max-height:280px; display:flex; flex-direction:column; }
+.agent-ref-confirm-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px 6px; border-bottom:1px solid var(--line); }
+.agent-ref-confirm-title { font-size:12px; font-weight:600; color:var(--text); }
+.agent-ref-confirm-close { width:22px; height:22px; border-radius:6px; border:none; background:none; color:var(--muted); cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.agent-ref-confirm-close:hover { color:var(--text); background:var(--soft); }
+.agent-ref-confirm-close i,.agent-ref-confirm-close svg { width:13px; height:13px; }
+.agent-ref-confirm-body { flex:1; overflow-y:auto; padding:8px 14px; }
+.agent-ref-confirm-task { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--line); }
+.agent-ref-confirm-task:last-child { border-bottom:none; }
+.agent-ref-confirm-task-num { min-width:20px; height:20px; border-radius:10px; background:var(--soft); color:var(--strong); font-size:10px; font-weight:600; line-height:20px; text-align:center; }
+.agent-ref-confirm-task-refs { display:flex; gap:3px; flex-wrap:wrap; }
+.agent-ref-confirm-task-ref { min-width:18px; height:18px; border-radius:9px; background:rgba(59,130,246,.12); color:#3b82f6; font-size:9px; font-weight:600; line-height:18px; text-align:center; padding:0 4px; }
+.agent-ref-confirm-task-prompt { flex:1; font-size:10px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.agent-ref-confirm-task-mode { font-size:9px; padding:1px 6px; border-radius:4px; font-weight:500; }
+.agent-ref-confirm-task-mode.split { background:rgba(34,197,94,.12); color:#22c55e; }
+.agent-ref-confirm-task-mode.combine { background:rgba(249,115,22,.12); color:#f97316; }
+.agent-ref-confirm-task-mode.single { background:rgba(99,102,241,.12); color:#6366f1; }
+.agent-ref-confirm-actions { display:flex; gap:8px; padding:8px 14px 10px; border-top:1px solid var(--line); }
+.agent-ref-confirm-btn { flex:1; height:32px; border-radius:8px; border:none; font-size:12px; font-weight:500; cursor:pointer; transition:opacity .14s ease; }
+.agent-ref-confirm-btn.primary { background:var(--strong); color:#fff; }
+.agent-ref-confirm-btn.primary:hover { opacity:.88; }
+.agent-ref-confirm-btn.secondary { background:var(--soft); color:var(--text); }
+.agent-ref-confirm-btn.secondary:hover { opacity:.88; }
 .agent-onebox textarea { display:block; width:100%; min-width:0; resize:none; max-height:200px; border:none; background:transparent; color:var(--text); padding:8px 12px; font-size:11.5px; line-height:1.5; outline:none; font-family:inherit; }
 .agent-toolbar { display:flex; align-items:center; gap:4px; padding:4px 8px 6px; }
 .agent-toolbar-icon { width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; border:none; background:none; color:var(--muted); cursor:pointer; transition:color .14s ease, background .14s ease; }

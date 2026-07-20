@@ -16860,13 +16860,21 @@ function normalizePrompts(prompts){
             return t ? {prompt:t, count:1, use_last_outputs:false, use_attachments:false, status:'pending'} : null;
         }
         if(p && typeof p === 'object' && typeof p.prompt === 'string' && p.prompt.trim()){
-            return {
+            const normalized = {
                 prompt:p.prompt.trim(),
                 count:Math.max(1, Math.min(8, Number(p.count) || 1)),
                 use_last_outputs:!!p.use_last_outputs,
                 use_attachments:!!p.use_attachments,
                 status:p.status || 'pending'
             };
+            // attachment_indices: 指定该 prompt 只使用哪些附件作为参考图（0-based 索引数组）
+            // LLM 可用此字段实现"每条 prompt 只带特定参考图"的精细控制
+            if(Array.isArray(p.attachment_indices)){
+                normalized.attachment_indices = p.attachment_indices
+                    .filter(i => Number.isFinite(Number(i)) && Number(i) >= 0)
+                    .map(i => Math.floor(Number(i)));
+            }
+            return normalized;
         }
         return null;
     }).filter(p => p);
@@ -17132,6 +17140,104 @@ function isVagueImageRequest(text){
     if(t.length < 25 && !hasStyle) return true;
     return false;
 }
+// ★ 纯文字引导解析器：从用户输入中识别图N引用，判断拆分/组合模式
+// 返回 { mode, tasks } 或 null（无图引用时）
+// mode: 'split'（每张独立出图） | 'combine'（多图合成一张） | 'single'（单任务）
+// tasks: [{ prompt, attachment_indices(0-based) }]
+function parseImageRefTasks(text, attachCount){
+    if(!text || !attachCount || attachCount === 0) return null;
+    const uniqueRefs = new Set();
+    const consumedRanges = []; // {start, end} 文本索引范围，避免重复匹配
+    // 1. 范围：图1到图7, 图1至7, 图1-4, 图1~4
+    const rangeRe = /图\s*(\d+)\s*[到至\-~]\s*图?\s*(\d+)/g;
+    let m;
+    while((m = rangeRe.exec(text)) !== null){
+        const lo = Math.min(parseInt(m[1]), parseInt(m[2]));
+        const hi = Math.max(parseInt(m[1]), parseInt(m[2]));
+        for(let i = lo; i <= hi; i++){ if(i >= 1 && i <= attachCount) uniqueRefs.add(i); }
+        consumedRanges.push({start:m.index, end:m.index + m[0].length});
+    }
+    // 2. 列表和单个：图1、2、3 或 图1
+    const listRe = /图\s*(\d+)((?:\s*[、,，和与]\s*\d+)*)/g;
+    while((m = listRe.exec(text)) !== null){
+        const ms = m.index, me = m.index + m[0].length;
+        if(consumedRanges.some(r => ms >= r.start && me <= r.end)) continue;
+        const first = parseInt(m[1]);
+        if(first >= 1 && first <= attachCount) uniqueRefs.add(first);
+        if(m[2]){
+            const restNums = m[2].match(/\d+/g);
+            if(restNums) restNums.forEach(n => { const num = parseInt(n); if(num >= 1 && num <= attachCount) uniqueRefs.add(num); });
+        }
+    }
+    // "前面N张" / "前N张"
+    const frontRe = /前(?:面)?\s*(\d+)\s*张/;
+    const frontMatch = text.match(frontRe);
+    if(frontMatch){
+        const n = parseInt(frontMatch[1]);
+        for(let i = 1; i <= Math.min(n, attachCount); i++) uniqueRefs.add(i);
+    }
+    if(uniqueRefs.size === 0) return null;
+    const allRefs = Array.from(uniqueRefs).sort((a, b) => a - b);
+    // 3. 识别公共参考图：按照图N, 用图N, 图N的方式/风格/版式
+    const commonRefs = new Set();
+    const commonRe1 = /(?:按照|用|参考|参照)\s*图\s*(\d+)/g;
+    while((m = commonRe1.exec(text)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) commonRefs.add(num); }
+    const commonRe2 = /图\s*(\d+)\s*的\s*(?:方式|风格|版式|构图|布局|模板)/g;
+    while((m = commonRe2.exec(text)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) commonRefs.add(num); }
+    // 4. 独立图 = 全部 - 公共
+    const independentRefs = allRefs.filter(r => !commonRefs.has(r));
+    // 5. 模式判断
+    const hasReplace = /替换/.test(text);
+    if(hasReplace){
+        // 组合模式：所有图合成一张
+        return { mode:'combine', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+    }
+    if(commonRefs.size > 0 && independentRefs.length > 0){
+        // 拆分模式：每张独立图 + 公共图
+        const commonArr = Array.from(commonRefs).sort((a, b) => a - b).map(r => r - 1);
+        const tasks = independentRefs.map(ref => ({ prompt:text, attachment_indices:[ref - 1, ...commonArr] }));
+        return { mode:'split', tasks };
+    }
+    const hasSplitKeyword = /各出一张|各出|分别|各一张|每张/.test(text);
+    if(hasSplitKeyword && independentRefs.length > 0){
+        // 拆分模式（无公共图）
+        const tasks = independentRefs.map(ref => ({ prompt:text, attachment_indices:[ref - 1] }));
+        return { mode:'split', tasks };
+    }
+    // 默认：单任务带所有引用图
+    return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+}
+// ★ 确认面板：显示解析后的参考图任务列表，等待用户确认/取消
+let _agentRefConfirmResolver = null;
+function showImageRefConfirmPanel(refTasks){
+    return new Promise(resolve => {
+        const panel = document.getElementById('agentRefConfirmPanel');
+        const body = document.getElementById('agentRefConfirmBody');
+        if(!panel || !body){ resolve(false); return; }
+        const modeLabel = { split:'拆分', combine:'组合', single:'单任务' };
+        let html = '';
+        refTasks.tasks.forEach((task, i) => {
+            const refs = task.attachment_indices.map(idx => `图${idx + 1}`).join(' ');
+            const promptSnippet = String(task.prompt || '').slice(0, 60) + (String(task.prompt || '').length > 60 ? '...' : '');
+            html += `<div class="agent-ref-confirm-task">`;
+            html += `<span class="agent-ref-confirm-task-num">${i + 1}</span>`;
+            html += `<span class="agent-ref-confirm-task-mode ${refTasks.mode}">${modeLabel[refTasks.mode] || ''}</span>`;
+            html += `<div class="agent-ref-confirm-task-refs">`;
+            task.attachment_indices.forEach(idx => { html += `<span class="agent-ref-confirm-task-ref">图${idx + 1}</span>`; });
+            html += `</div>`;
+            html += `<span class="agent-ref-confirm-task-prompt" title="${escapeHtml(task.prompt || '')}">${escapeHtml(promptSnippet)}</span>`;
+            html += `</div>`;
+        });
+        body.innerHTML = html;
+        panel.hidden = false;
+        _agentRefConfirmResolver = resolve;
+    });
+}
+function hideImageRefConfirmPanel(result){
+    const panel = document.getElementById('agentRefConfirmPanel');
+    if(panel) panel.hidden = true;
+    if(_agentRefConfirmResolver){ _agentRefConfirmResolver(result); _agentRefConfirmResolver = null; }
+}
 function agentRatioLabel(key){
     const map = {square:'1:1', portrait:'2:3', portrait43:'3:4', landscape43:'4:3', landscape:'3:2', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21'};
     return map[key] || key || '1:1';
@@ -17261,7 +17367,7 @@ function renderAgentAttachments(){
         html += `<div class="agent-attach-skill"><i data-lucide="file-text"></i><span class="agent-attach-skill-name">${escapeHtml(skill.name || 'skill.md')}</span><button type="button" data-agent-skill-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     attachments.forEach((att, i) => {
-        html += `<div class="agent-attach-chip" draggable="${attachments.length > 1 ? 'true' : 'false'}" data-agent-att-index="${i}" title="${escapeHtml(att.name || 'image')}"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
+        html += `<div class="agent-attach-chip" draggable="${attachments.length > 1 ? 'true' : 'false'}" data-agent-att-index="${i}" title="${escapeHtml(att.name || 'image')}"><span class="agent-att-num">${i + 1}</span><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     agentAttachRow.innerHTML = html;
     if(window.lucide) lucide.createIcons();
@@ -17392,10 +17498,14 @@ function agentGenCardHtml(gen){
     const status = gen.status || 'running';
     const statusText = status === 'done' ? tr('smart.agentGenDone') : status === 'error' ? tr('smart.agentGenFail') : tr('smart.agentGenerating');
     const refTags = [gen.use_last_outputs ? tr('smart.agentRefLast') : '', gen.use_attachments ? tr('smart.agentRefAttach') : ''].filter(Boolean).join(' · ');
+    // 显示参考图索引指示器（当指定了 attachment_indices 时）
+    const attachIdxTag = (Array.isArray(gen.attachment_indices) && gen.attachment_indices.length > 0)
+        ? `参考图#${gen.attachment_indices.map(i => i + 1).join(',')}` : '';
+    const fullRefTags = [refTags, attachIdxTag].filter(Boolean).join(' · ');
     const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer">`).join('');
     const promptText = escapeHtml(gen.prompt || '');
     const promptHtml = promptText ? `<div class="agent-gen-prompt agent-gen-prompt-collapsed" data-agent-gen-prompt="1">${promptText}<button class="agent-gen-prompt-toggle" type="button" data-agent-prompt-toggle="1">${escapeHtml(tr('smart.agentExpand') || '展开')}</button></div>` : '';
-    return `<div class="agent-gen-card">${promptHtml}<div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${refTags ? ' · ' + escapeHtml(refTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
+    return `<div class="agent-gen-card">${promptHtml}<div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${fullRefTags ? ' · ' + escapeHtml(fullRefTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
 }
 function agentMessageHtml(msg){
     const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
@@ -17520,14 +17630,18 @@ function renderAgentMessages(){
                         });
                         const confirmedPrompts = lastAssistantMsg.prompts.filter(p => p && typeof p === 'object' && p.status === 'confirmed');
                         // 构建 generations（透传属性）
-                        lastAssistantMsg.generations = confirmedPrompts.map(p => ({
-                            prompt:p.prompt,
-                            count:p.count || 1,
-                            use_last_outputs:!!p.use_last_outputs,
-                            use_attachments:!!p.use_attachments,
-                            results:[],
-                            status:'running'
-                        }));
+                        lastAssistantMsg.generations = confirmedPrompts.map(p => {
+                            const g = {
+                                prompt:p.prompt,
+                                count:p.count || 1,
+                                use_last_outputs:!!p.use_last_outputs,
+                                use_attachments:!!p.use_attachments,
+                                results:[],
+                                status:'running'
+                            };
+                            if(Array.isArray(p.attachment_indices)) g.attachment_indices = p.attachment_indices;
+                            return g;
+                        });
                     }
                     if(lastAssistantMsg.generations?.length){
                         runAgentGenerations(lastAssistantMsg, lastUserMsg);
@@ -17787,15 +17901,28 @@ When a skill document is provided, every prompt you generate MUST fully and verb
         const text = String(skill?.content || '').trim();
         if(text) parts.push(`===== Skill 文档开始：${skill.name} =====${AGENT_NL}${AGENT_NL}${text}${AGENT_NL}${AGENT_NL}===== Skill 文档结束：${skill.name} =====`);
     });
-    parts.push(AGENT_FORMAT_INSTRUCTION);
+    // 思维模式和非思维模式使用不同的基础指令，避免冲突
+    const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
+    if(thinkingModeOn){
+        // 思维模式：只注入格式要求，不注入"能生成就生成"指令
+        parts.push(`You are an AI image-generation agent in Thinking Mode (progressive dimension collection mode).
+Reply with raw JSON only (no markdown, no extra text):
+{"reply":"回复用户的话","options":[{"label":"选项名","value":"选项值"}],"collected":{},"next_dimension":"","remaining_dimensions":[],"prompts":[],"generations":[]}
+
+Fields: "reply"=对话回复; "options"=[{label,value}]按钮选项; "collected"=已确认的维度字典; "next_dimension"=下一轮维度; "remaining_dimensions"=剩余维度数组; "prompts"=待确认的中文提示词（仅最终轮返回）; "generations"=立即生成的图片（思维模式下始终为空）.
+
+所有prompt必须中文，包含主体/风格/构图/光线/色彩/细节/氛围
+文字规则：默认情况下prompt不要包含文字内容（标题、对白、台词、旁白、字幕），只描述画面视觉元素");
+    } else {
+        parts.push(AGENT_FORMAT_INSTRUCTION);
+    }
     // 注入最终出图数量（前端已决策：输入框显式要求 > 工具栏设置）
     // LLM 无需自行判断数量，只需按此数量返回对应条数
     const _finalCount = Math.max(1, Math.min(8, Number(finalCount) || Number(agentState?.genCount) || 1));
     if(_finalCount > 1){
         parts.push(`【出图数量 / Output Count】系统要求生成 ${_finalCount} 张图。每张是独立的图片，在主题/品牌方向/变体方向上必须有明显差异（不能只是换个颜色或微调）。数量已由系统决定（综合工具栏设置和输入框显式要求），你无需自行判断，只需返回恰好 ${_finalCount} 条。`);
     }
-    // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令
-    const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
+    // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令（thinkingModeOn 已在上方计算）
     if(thinkingModeOn){
         parts.push(`当前为思维模式（渐进式多维采集模式）。核心原则：通过多轮提问逐步收集用户需求，所有维度确认后生成详细提示词。
 
@@ -17803,10 +17930,18 @@ When a skill document is provided, every prompt you generate MUST fully and verb
 
 总体流程：逐轮提问维度 → 用户选择 → 下一轮提问下一个维度 → ... → 所有维度确认 → 生成最终提示词
 
+★★★ 最高优先级规则 ★★★
+当返回 options 时（即 options 数组非空），prompts 和 generations 必须为空数组 []。
+绝对不允许在同一轮中同时返回 options 和 prompts。
+如果 options 非空，prompts 必须为 []，generations 必须为 []。
+违反此规则会导致流程被跳过，用户体验严重受损。
+
 轮次判断规则：
-- 如果还有 ≥2 个维度未确认 → 返回 options，继续提问
-- 如果只剩 1 个维度未确认 → 返回 options，最后一轮提问  
-- 如果所有维度已确认 → 生成最终提示词（返回 prompts）
+- 如果还有 ≥2 个维度未确认 → 返回 options（2-4个选项），prompts=[]
+- 如果只剩 1 个维度未确认 → 返回 options（2-4个选项），prompts=[]
+- 如果所有维度已确认 → prompts 返回最终提示词，options=[]
+- 每一轮只提问一个维度，不要一次性问多个
+- 除非用户明确说"直接生成"或"不用选了"，否则必须逐轮提问
 
 维度优先级（按重要性排序）：
 1. 风格 (画风/艺术流派) - 如水墨风、油画风、赛博朋克、Q版卡通
@@ -17851,6 +17986,21 @@ When a skill document is provided, every prompt you generate MUST fully and verb
 - 系统要求生成N张图时（见上方"出图数量"），prompts 数组返回恰好N条
 - 每条 prompt 目标长度：200-500 字，尽可能详细丰富
 - 每条必须包含：主体、风格、场景、构图、光线、色彩、细节、氛围
+
+【参考图选择规则 / attachment_indices】
+
+当用户上传了多张参考图，且需要生成多张图（每张参考不同的参考图风格/版式）时：
+- 每条 prompt 可以指定 attachment_indices 字段（0-based 整数数组），精确控制该条 prompt 只使用哪些参考图
+- 不指定 attachment_indices 时，默认使用全部参考图
+- 示例：用户上传了8张图（7张版式参考+1张产品图，索引0-7），要求按7种版式各出1张产品图：
+  {"prompts":[
+    {"prompt":"产品图，版式A的描述...", "count":1, "use_attachments":true, "attachment_indices":[0, 7]},
+    {"prompt":"产品图，版式B的描述...", "count":1, "use_attachments":true, "attachment_indices":[1, 7]},
+    {"prompt":"产品图，版式C的描述...", "count":1, "use_attachments":true, "attachment_indices":[2, 7]},
+    ...
+  ]}
+- 这样每条 prompt 只带2张参考图（1张版式+1张产品），避免生图模型混淆多张参考图
+- 如果参考图是整体风格参考（不需要区分），则不需要指定 attachment_indices
 
 【修改请求规则】
 
@@ -17946,6 +18096,40 @@ function extractGenPrompt(text){
     }
     return null;
 }
+// 从文本中提取所有顶层 JSON 对象（使用括号匹配算法，比 indexOf/lastIndexOf 更可靠）
+function extractJsonBlocks(text){
+    const blocks = [];
+    let i = 0;
+    while(i < text.length){
+        if(text[i] === '{'){
+            let depth = 0;
+            let inStr = false;
+            let escape = false;
+            let end = -1;
+            for(let j = i; j < text.length; j++){
+                const ch = text[j];
+                if(escape){ escape = false; continue; }
+                if(ch === '\\'){ escape = true; continue; }
+                if(ch === '"'){ inStr = !inStr; continue; }
+                if(inStr) continue;
+                if(ch === '{') depth++;
+                else if(ch === '}'){
+                    depth--;
+                    if(depth === 0){ end = j; break; }
+                }
+            }
+            if(end > i){
+                blocks.push(text.slice(i, end + 1));
+                i = end + 1;
+            } else {
+                i++;
+            }
+        } else {
+            i++;
+        }
+    }
+    return blocks;
+}
 function parseAgentResponse(raw, lastUserText){
     const text = String(raw || '').trim();
     const candidates = [text];
@@ -17958,9 +18142,13 @@ function parseAgentResponse(raw, lastUserText){
             if(inner) candidates.unshift(inner);
         }
     }
-    const braceStart = text.indexOf('{');
-    const braceEnd = text.lastIndexOf('}');
-    if(braceStart >= 0 && braceEnd > braceStart) candidates.push(text.slice(braceStart, braceEnd + 1));
+    // 使用括号匹配算法提取所有 JSON 对象（比 indexOf/lastIndexOf 更可靠）
+    const jsonBlocks = extractJsonBlocks(text);
+    for(const block of jsonBlocks){
+        if(!candidates.includes(block)) candidates.unshift(block);
+    }
+    // 先解析所有可成功的 JSON 候选，再按优先级选择最合适的一个
+    const parsedCandidates = [];
     for(const candidate of candidates){
         try {
             const data = JSON.parse(candidate);
@@ -17968,9 +18156,8 @@ function parseAgentResponse(raw, lastUserText){
             const reply = typeof data.reply === 'string' ? data.reply : (typeof data.text === 'string' ? data.text : '');
             let options = (Array.isArray(data.options) ? data.options : [])
                 .filter(o => o && typeof o.label === 'string' && typeof o.value === 'string')
-                .slice(0, 8)  // 增加到 8 以容纳自定义输入
+                .slice(0, 8)
                 .map(o => ({label:o.label.trim(), value:o.value.trim()}));
-            // 如果有 options 且末尾不是"自定义输入"，自动追加
             if(options.length > 0 && options.length < 8 && !options.some(o => o.value === 'CUSTOM_INPUT')){
                 options.push({label:'自定义输入', value:'CUSTOM_INPUT'});
             }
@@ -17982,15 +18169,39 @@ function parseAgentResponse(raw, lastUserText){
             const generations = (Array.isArray(data.generations) ? data.generations : [])
                 .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
                 .slice(0, AGENT_GEN_MAX_PER_MSG)
-                .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
-            // 解析新字段：collected、next_dimension、remaining_dimensions
+                .map(g => {
+                    const gen = {prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'};
+                    if(Array.isArray(g.attachment_indices)) gen.attachment_indices = g.attachment_indices.filter(i => Number.isFinite(Number(i)) && Number(i) >= 0).map(i => Math.floor(Number(i)));
+                    return gen;
+                });
             const collected = (data.collected && typeof data.collected === 'object') ? data.collected : {};
             const nextDimension = typeof data.next_dimension === 'string' ? data.next_dimension : '';
             const remainingDimensions = Array.isArray(data.remaining_dimensions) ? data.remaining_dimensions : [];
-            return {reply, options, prompts, generations, collected, next_dimension, remaining_dimensions};
+            parsedCandidates.push({reply, options, prompts, generations, collected, next_dimension, remainingDimensions});
         } catch(e) { /* 尝试下一个候选 */ }
     }
+    // 如果有多个解析成功的候选，按优先级选择：
+    // 1. 优先选择有 options 且无 generations 的（思维模式维度选择轮次）
+    // 2. 其次选择有 options 的
+    // 3. 其次选择有 prompts 的
+    // 4. 其次选择有 generations 的
+    // 5. 最后选择有 reply 的
+    if(parsedCandidates.length > 0){
+        const score = c => {
+            let s = 0;
+            if(c.options.length > 0 && c.generations.length === 0) s += 100; // 思维模式维度选择
+            else if(c.options.length > 0) s += 50;
+            if(c.prompts.length > 0) s += 30;
+            if(c.generations.length > 0) s += 20;
+            if(c.reply) s += 10;
+            if(Object.keys(c.collected).length > 0) s += 5;
+            return s;
+        };
+        parsedCandidates.sort((a, b) => score(b) - score(a));
+        return parsedCandidates[0];
+    }
     // JSON 解析失败时的 fallback 链
+    console.error('[parseAgentResponse] JSON 解析失败，原始文本:', text.slice(0, 500));
     const numberedFallback = extractNumberedOptions(text);
     if(numberedFallback){
         const fallbackOptions = numberedFallback.options || [];
@@ -18127,6 +18338,13 @@ if(!Array.isArray(parsed.generations)) parsed.generations = [];
     if(thinkingModeOn){
         const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
         const isModifyRequest = userModifyRe.test(text);
+        // ★ 渐进式强制保障：思维模式下，如果 LLM 返回了 options（还在维度采集阶段），
+        //   则无论它是否同时返回了 prompts 或 generations，都强制清空。
+        //   这确保 LLM 无法跳过渐进式流程——prompts 只能在 options 为空时出现。
+        if(parsed.options.length > 0){
+            parsed.prompts = [];
+            parsed.generations = [];
+        }
         // 思维模式下，无论是否修改请求，都走 prompts 确认流程
         // 1. generations → prompts 转换（始终转换，不受 options 影响）
         //    之前的 bug：条件含 parsed.options.length === 0，导致 LLM 同时返回 options+generations 时
@@ -18141,13 +18359,15 @@ if(!Array.isArray(parsed.generations)) parsed.generations = [];
                 if(!promptText) return;
                 const c = Math.max(1, Math.min(8, Number(g.count) || 1));
                 for(let i = 0; i < c; i++){
-                    convertedPrompts.push({
+                    const p = {
                         prompt:promptText,
                         count:1,
                         use_last_outputs:!!g.use_last_outputs,
                         use_attachments:!!g.use_attachments,
                         status:'pending'
-                    });
+                    };
+                    if(Array.isArray(g.attachment_indices)) p.attachment_indices = g.attachment_indices;
+                    convertedPrompts.push(p);
                 }
             });
             // 如果 LLM 同时返回了 prompts，合并（generations 转换的在前）
@@ -18168,8 +18388,26 @@ if(!Array.isArray(parsed.generations)) parsed.generations = [];
         }
         // 2. 如果 prompts 仍为空，创建默认 prompt
         if(parsed.prompts.length === 0 && parsed.options.length === 0 && parsed.generations.length === 0){
-            parsed.prompts = [{prompt:text, count:1, use_last_outputs:isModifyRequest, use_attachments:false, status:'pending'}];
-            if(!parsed.reply) parsed.reply = '请确认以下提示词：';
+            // 检查 reply 是否包含 JSON 标记（说明解析失败了，但 LLM 确实返回了结构化数据）
+            const replyLooksLikeJson = parsed.reply && (parsed.reply.includes('"reply"') || parsed.reply.includes('"options"') || parsed.reply.trim().startsWith('{'));
+            if(replyLooksLikeJson){
+                // 解析失败但 LLM 返回了 JSON：不创建 prompt，显示错误让用户重试
+                console.error('[thinkingMode] LLM 返回了 JSON 但解析失败，reply:', parsed.reply?.slice(0, 200));
+                parsed.reply = '⚠️ AI 返回了结构化数据但格式异常，请重试或换个描述。';
+                parsed.options = [];
+            } else if(isVagueImageRequest(text) && !isModifyRequest){
+                // 模糊请求：强制走维度选择
+                parsed.options = [
+                    {label:'水墨风', value:'水墨风'},
+                    {label:'油画风', value:'油画风'},
+                    {label:'赛博朋克', value:'赛博朋克'},
+                    {label:'Q版卡通', value:'Q版卡通'}
+                ];
+                parsed.reply = '你的输入比较简略，请先选择一个风格方向，我再为你逐步完善：';
+            } else {
+                parsed.prompts = [{prompt:text, count:1, use_last_outputs:isModifyRequest, use_attachments:false, status:'pending'}];
+                if(!parsed.reply) parsed.reply = '请确认以下提示词：';
+            }
         }
         // 3. 数量校准：如果用户设置了 genCount>1 或文本请求了N张
         // 3a. 少于请求数量 → 补充（加入差异化方向，避免生成的图几乎一样）
@@ -18300,10 +18538,12 @@ async function sendAgentMessage(){
         const resolution = agentState.genResolution || '1k';
         const count = Math.max(1, Math.min(8, Number(agentState.genCount) || 1));
         
-        // 构建 generations
-        const generations = [];
+        // ★ 图片引用解析：检测用户输入中的"图N"引用，构建精确的 attachment_indices
+        const refTasks = parseImageRefTasks(text, attachments.length);
+        let generations = [];
+        let requestedCount = count;
         const _finalCount = resolveFinalGenCount(text);
-        const requestedCount = _finalCount.count > 1 ? _finalCount.count : count;
+        if(_finalCount.count > 1) requestedCount = _finalCount.count;
         
         // 判断是否是修改请求
         const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
@@ -18311,17 +18551,38 @@ async function sendAgentMessage(){
         const useLastOutputs = isModifyRequest;
         const useAttachments = attachments.length > 0;
         
-        // 根据数量构建多条 generations（如果需要）
-        for(let i = 0; i < Math.max(requestedCount, 1); i++){
-            const promptText = requestedCount > 1 ? `${text}（变体${i + 1}，不同构图/角度/场景）` : text;
-            generations.push({
-                prompt: promptText,
+        if(refTasks && refTasks.tasks.length > 0){
+            // ★ 检测到图片引用：弹确认面板
+            const confirmed = await showImageRefConfirmPanel(refTasks);
+            if(!confirmed){
+                hideImageRefConfirmPanel(false);
+                return; // 用户取消
+            }
+            hideImageRefConfirmPanel(true);
+            // 从确认的任务构建 generations
+            generations = refTasks.tasks.map(task => ({
+                prompt: task.prompt,
                 count: 1,
                 use_last_outputs: useLastOutputs,
-                use_attachments: useAttachments,
+                use_attachments: true,
+                attachment_indices: task.attachment_indices,
                 results: [],
                 status: 'running'
-            });
+            }));
+            requestedCount = generations.length;
+        } else {
+            // 正常模式：根据数量构建 generations
+            for(let i = 0; i < Math.max(requestedCount, 1); i++){
+                const promptText = requestedCount > 1 ? `${text}（变体${i + 1}，不同构图/角度/场景）` : text;
+                generations.push({
+                    prompt: promptText,
+                    count: 1,
+                    use_last_outputs: useLastOutputs,
+                    use_attachments: useAttachments,
+                    results: [],
+                    status: 'running'
+                });
+            }
         }
         
         // 创建 user 消息
@@ -18566,14 +18827,18 @@ async function _triggerGenerationsIfAllDone(assistantMsg){
     }
     // 构建 generations（透传 LLM 返回的 count/use_last_outputs/use_attachments）
     // 用赋值而非 push，避免重复调用时 generations 重复追加
-    assistantMsg.generations = confirmedPrompts.map(cp => ({
-        prompt:cp.prompt,
-        count:cp.count || 1,
-        use_last_outputs:cp.use_last_outputs || false,
-        use_attachments:cp.use_attachments || false,
-        results:[],
-        status:'running'
-    }));
+    assistantMsg.generations = confirmedPrompts.map(cp => {
+        const g = {
+            prompt:cp.prompt,
+            count:cp.count || 1,
+            use_last_outputs:cp.use_last_outputs || false,
+            use_attachments:cp.use_attachments || false,
+            results:[],
+            status:'running'
+        };
+        if(Array.isArray(cp.attachment_indices)) g.attachment_indices = cp.attachment_indices;
+        return g;
+    });
     // 统一生图（所有 confirmed prompts 一次性传入，整齐排列）
     await runAgentGenerations(assistantMsg, userMsg);
 }
@@ -18821,10 +19086,23 @@ async function runAgentGenerations(assistantMsg, userMsg){
     renderAgentMessages();
     // 第二步：并行发起所有生图请求
     await Promise.all(placeholders.map(async ({gen, placeholderNode}) => {
+        // 保存占位节点 ID，后续通过 ID 从 nodes 数组重新查找，避免 nodes 被重新赋值后引用悬空
+        const placeholderId = placeholderNode?.id || null;
         try {
             let refs = [];
             if(gen.use_last_outputs) refs = refs.concat(lastResults);
-            if(gen.use_attachments) refs = refs.concat(attachRefs);
+            if(gen.use_attachments){
+                // 如果指定了 attachment_indices，只取对应的附件（0-based 索引）
+                if(Array.isArray(gen.attachment_indices) && gen.attachment_indices.length > 0){
+                    const filtered = gen.attachment_indices
+                        .filter(i => i >= 0 && i < attachRefs.length)
+                        .map(i => attachRefs[i])
+                        .filter(Boolean);
+                    refs = refs.concat(filtered);
+                } else {
+                    refs = refs.concat(attachRefs);
+                }
+            }
             const _agentRefMax = providerMaxReferenceImages(providerId);
             refs = imageRefsOnly(refs).slice(0, _agentRefMax).map(r => ({url:r.url, name:r.name || 'ref'}));
             const payload = {prompt:gen.prompt, provider_id:providerId, model:genModel, size, quality:agentState.genQuality || 'auto', n:1, reference_images:refs};
@@ -18834,7 +19112,7 @@ async function runAgentGenerations(assistantMsg, userMsg){
             })));
             const imageTaskIds = tasks.map(t => t.task_id).filter(Boolean);
             gen.taskIds = imageTaskIds;
-            if(placeholderNode) gen.placeholderNodeId = placeholderNode.id;
+            if(placeholderId) gen.placeholderNodeId = placeholderId;
             saveAgentState();
             const results = await Promise.all(imageTaskIds.map(id => pollSmartCanvasTask(id)));
             // 限制每个 generation 最多只取 gen.count 张图（防止 API 单次返回多张图导致节点图片重复）
@@ -18847,25 +19125,41 @@ async function runAgentGenerations(assistantMsg, userMsg){
             }).filter(i => i.url && !_refUrlSet.has(i.url)).slice(0, _maxCount);
             gen.results = urls;
             gen.status = 'done';
-            if(urls.length && placeholderNode){
+            // 关键：通过 ID 从当前 nodes 数组重新查找节点引用
+            // nodes 可能在异步等待期间被重新赋值（如 saveCanvas 409 合并、applyMergedServerCanvas），
+            // 导致之前捕获的 placeholderNode 变成悬空引用
+            const liveNode = placeholderId ? nodes.find(n => n.id === placeholderId) : null;
+            if(urls.length && liveNode){
                 undoSuppressed = true;
-                placeholderNode.images = urls.map(u => ({...u}));
-                placeholderNode.pending = 0;
-                placeholderNode.title = urls.length > 1 ? 'Group' : 'Image';
-                placeholderNode.runFinishedAt = nowMs();
-                placeholderNode.scale = mediaNodeDefaultScale(placeholderNode);
-                delete placeholderNode.w;
-                delete placeholderNode.h;
-                selectedId = placeholderNode.id;
+                liveNode.images = urls.map(u => ({...u}));
+                liveNode.pending = 0;
+                liveNode.title = urls.length > 1 ? 'Group' : 'Image';
+                liveNode.runFinishedAt = nowMs();
+                liveNode.scale = mediaNodeDefaultScale(liveNode);
+                delete liveNode.w;
+                delete liveNode.h;
+                selectedId = liveNode.id;
                 undoSuppressed = false;
-                gen.results = gen.results.map((r, i) => ({...r, nodeId: placeholderNode.id, nodeX: Number(placeholderNode.x) || 0, nodeY: Number(placeholderNode.y) || 0}));
+                gen.results = gen.results.map((r, i) => ({...r, nodeId: liveNode.id, nodeX: Number(liveNode.x) || 0, nodeY: Number(liveNode.y) || 0}));
+            } else if(urls.length && !liveNode){
+                // 占位节点已不在 nodes 中（可能被用户删除或被合并操作移除）
+                // 创建新节点放置生成结果
+                console.warn('[runAgentGenerations] placeholder node not found, creating new node for results');
+                const pos = agentFindEmptyPosition(urls.length);
+                const newNode = createImageNodeAt(pos, urls.map(u => ({...u})));
+                if(newNode){
+                    newNode.runFinishedAt = nowMs();
+                    newNode.runStartedAt = newNode.runFinishedAt;
+                    gen.results = gen.results.map((r, i) => ({...r, nodeId: newNode.id, nodeX: Number(newNode.x) || 0, nodeY: Number(newNode.y) || 0}));
+                }
             }
         } catch(e) {
             gen.status = 'error';
             gen.error = String(e.message || e).slice(0, 200);
-            if(placeholderNode){
+            const liveNode = placeholderId ? nodes.find(n => n.id === placeholderId) : null;
+            if(liveNode){
                 undoSuppressed = true;
-                nodes = nodes.filter(n => n.id !== placeholderNode.id);
+                nodes = nodes.filter(n => n.id !== placeholderId);
                 undoSuppressed = false;
             }
         }
@@ -19209,10 +19503,14 @@ function initAgentPanel(){
         saveAgentState();
     });
     agentAttachBtn?.addEventListener('click', () => agentImageInput?.click());
-    agentImageInput?.addEventListener('change', () => {
-        agentAttachFiles(agentImageInput.files);
-        agentImageInput.value = '';
-    });
+agentImageInput?.addEventListener('change', () => {
+agentAttachFiles(agentImageInput.files);
+agentImageInput.value = '';
+});
+// ★ 确认面板按钮事件
+document.getElementById('agentRefConfirmYes')?.addEventListener('click', () => hideImageRefConfirmPanel(true));
+document.getElementById('agentRefConfirmNo')?.addEventListener('click', () => hideImageRefConfirmPanel(false));
+document.getElementById('agentRefConfirmCancel')?.addEventListener('click', () => hideImageRefConfirmPanel(false));
 // 思维模式开关按钮
 const agentThinkingBtn = document.getElementById('agentThinkingBtn');
 function syncAgentThinkingBtn(){

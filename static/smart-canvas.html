@@ -16,11 +16,11 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/lucide.js?v=v1.5.1784282603"></script>
-    <script src="/static/js/theme.js?v=v1.5.1784282603"></script>
-    <script src="/static/js/touch-mouse.js?v=v1.5.1784282603"></script>
-    <script src="/static/js/i18n.js?v=v1.5.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=v1.5.1784539881">
+    <script src="/static/vendor/js/lucide.js?v=v1.6.1784282603"></script>
+    <script src="/static/js/theme.js?v=v1.6.1784282603"></script>
+    <script src="/static/js/touch-mouse.js?v=v1.6.1784282603"></script>
+    <script src="/static/js/i18n.js?v=v1.6.1784282603"></script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=v1.6.1784539881">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -319,6 +319,17 @@
                 <div class="agent-input-resize" id="agentInputResize"></div>
             </div>
             <input id="agentImageInput" type="file" accept="image/*,.md,.markdown,.txt" multiple hidden>
+            <div id="agentRefConfirmPanel" class="agent-ref-confirm" hidden>
+                <div class="agent-ref-confirm-head">
+                    <span class="agent-ref-confirm-title">参考图任务确认</span>
+                    <button id="agentRefConfirmCancel" class="agent-ref-confirm-close" type="button"><i data-lucide="x"></i></button>
+                </div>
+                <div class="agent-ref-confirm-body" id="agentRefConfirmBody"></div>
+                <div class="agent-ref-confirm-actions">
+                    <button id="agentRefConfirmNo" class="agent-ref-confirm-btn secondary" type="button">取消</button>
+                    <button id="agentRefConfirmYes" class="agent-ref-confirm-btn primary" type="button">确认生成</button>
+                </div>
+            </div>
         </aside>
         <div id="assetDialogBackdrop" class="asset-dialog-backdrop" hidden>
             <div class="asset-dialog">
@@ -564,6 +575,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=v1.5.1784541866"></script>
+    <script src="/static/js/smart-canvas.js?v=v1.6.1784545404"></script>
 </body>
 </html>
