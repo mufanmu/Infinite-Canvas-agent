@@ -4928,13 +4928,7 @@ async def codex_reference_paths(reference_images=None):
                 continue
             path, created = await codex_prepare_local_media(url)
             if path:
-                # 压缩大图避免 CLI 传输超时
-                compressed = compress_reference_image(path, max_size=1024)
-                if compressed:
-                    paths.append(compressed)
-                    temp_paths.append(compressed)
-                else:
-                    paths.append(path)
+                paths.append(path)
             temp_paths.extend(created)
         return paths, temp_paths
     except Exception:
@@ -7578,26 +7572,6 @@ def convert_output_to_jpg(url, quality=88):
     except Exception as e:
         print(f"转换 JPG 失败: {e}")
         return url
-
-def compress_reference_image(path, max_size=1024):
-    """压缩参考图到最长边 max_size 像素，返回临时文件路径。如果原图已足够小则返回 None。"""
-    try:
-        with Image.open(path) as img:
-            img.load()
-            w, h = img.size
-            if max(w, h) <= max_size:
-                return None  # 原图足够小，不需要压缩
-            img.thumbnail((max_size, max_size), Image.LANCZOS)
-            if img.mode not in ("RGB", "RGBA"):
-                img = img.convert("RGB")
-            fmt = "PNG" if img.mode == "RGBA" else "JPEG"
-            fd, tmp_path = tempfile.mkstemp(prefix="ref_comp_", suffix=f".{fmt.lower()}")
-            with os.fdopen(fd, "wb") as f:
-                img.save(f, format=fmt, quality=88 if fmt == "JPEG" else None)
-            return tmp_path
-    except Exception as e:
-        print(f"compress_reference_image failed, using original: {e}")
-        return None
 
 def reference_to_data_url(ref, max_size=None):
     """把本地输出文件转为 data URL（base64）。max_size 限制最长边像素，避免 payload 过大。"""
@@ -10670,12 +10644,16 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             responses_url = provider_endpoint_url(provider, "image_generation_endpoint", "/v1/responses")
             response = await post_openai_responses(client, responses_url, api_headers(provider=provider, model=model), body)
         elif image_request_mode == "openai-json":
-            # Agnes 等“OpenAI JSON 图片接口”统一走 /images/generations：
+            # Agnes 等"OpenAI JSON 图片接口"统一走 /images/generations：
             # 不使用 /images/edits，不传顶层 response_format/n/quality；
             # 文生图只传 extra_body.response_format，图生图把参考图放进 extra_body.image。
+            # 参考图压缩到 768px：多张参考图 base64 后 payload 会急剧膨胀（8张1536px≈8.6MB），
+            # 降为 768px 可缩减到 ~2MB，避免上游 "image queue is full" 503 错误。
+            # 上游限制最多 6 张参考图（too many input images: at most 6 allowed）。
+            OPENAI_JSON_REF_MAX = 6
             extra_body = {"response_format": "url"}
             if image_refs:
-                extra_body["image"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                extra_body["image"] = [reference_to_data_url(ref, max_size=768) for ref in image_refs[:OPENAI_JSON_REF_MAX]]
             body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_apimart:
@@ -10691,7 +10669,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                 "official_fallback": False,
             }
             if image_refs:
-                body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                body["image_urls"] = [reference_to_data_url(ref, max_size=768) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_gpt2 and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
@@ -10705,7 +10683,6 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             # GPT-Image-2 参考图不能走 /images/generations JSON，否则部分平台会忽略原图或报 Images API unsupported。
             files = []
             opened = []
-            compressed_paths = []
             edit_failed_status = None
             edit_failed_text = ""
             try:
@@ -10713,13 +10690,9 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     path = output_file_from_url(ref.get("url", ""))
                     if not path:
                         continue
-                    # 压缩缩放参考图到最长边1024px，避免大文件导致 413 Request Entity Too Large
-                    compressed_path = compress_reference_image(path, max_size=1024)
-                    if compressed_path:
-                        compressed_paths.append(compressed_path)
-                    fh = open(compressed_path or path, "rb")
+                    fh = open(path, "rb")
                     opened.append(fh)
-                    files.append(("image", (os.path.basename(compressed_path or path), fh, content_type_for_path(compressed_path or path))))
+                    files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
                 if mask_refs:
                     mask_path = output_file_from_url(mask_refs[0].get("url", ""))
                     if mask_path:
@@ -10739,12 +10712,6 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             finally:
                 for fh in opened:
                     fh.close()
-                # 清理压缩临时文件
-                for cp in compressed_paths:
-                    try:
-                        os.remove(cp)
-                    except Exception:
-                        pass
             # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
             if response is None:
                 if is_gpt2:
@@ -10753,7 +10720,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                         detail=f"GPT-Image-2 编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
                     )
                 print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
-                image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                image_payload = [reference_to_data_url(ref, max_size=768) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
                 body = {
                     "model": model, "prompt": prompt, "size": size,
                     "response_format": "url", "n": 1,
@@ -13251,15 +13218,20 @@ async def build_online_image_result(payload: OnlineImageRequest):
     async def generate_one():
         # 网络错误自动重试（httpx.HTTPError 但非 HTTPStatusError）
         # 解决高并发时间歇性网络中断导致"请求上游生图接口失败"但图实际已生成的问题
+        # 同时对 503（queue is full）和 429（rate limit）等临时性错误也重试
         max_retries = 2
         for attempt in range(max_retries + 1):
             try:
                 image_data, raw_item = await generate_ai_image(payload.prompt, request_size, payload.quality, model, image_refs, provider["id"])
                 break
-            except httpx.HTTPStatusError:
-                raise  # HTTP 状态码错误不重试（如 400/401/403）
+            except httpx.HTTPStatusError as exc:
+                # 503（队列满/服务暂不可用）和 429（限流）是临时性错误，重试可解决
+                if exc.response.status_code in (429, 503) and attempt < max_retries:
+                    await asyncio.sleep(2.0 * (attempt + 1))
+                    continue
+                raise
             except httpx.HTTPError as exc:
-                if attempt + 1 <= max_retries:
+                if attempt < max_retries:
                     await asyncio.sleep(1.5 * (attempt + 1))
                     continue
                 raise
