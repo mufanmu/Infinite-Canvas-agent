@@ -7,7 +7,7 @@ Supports comfyui/API calls/modelscope calls
 
 > 本仓库是基于原项目 [hero8152/Infinite-Canvas](https://github.com/hero8152/Infinite-Canvas) 的二次开发 fork，新增了智能画布 AI Agent 面板。
 >
-> **当前版本：v1.5**（查看 [版本更新大纲](./CHANGELOG.md)）
+> **当前版本：v1.6**（查看 [版本更新大纲](./CHANGELOG.md)）
 
 ### 重要提示
 - **已关闭自动更新**：导航栏版本号显示为「Agent版(无自动更新)」。若从上游拉取/合并最新代码，可能覆盖本分支的 AI Agent 功能，请谨慎操作并先备份。
@@ -27,6 +27,7 @@ Supports comfyui/API calls/modelscope calls
 | v1.4 | 2026-07-19 | 多图确认流程重构（全部确认后统一生图）、prompts 状态机、内联编辑、Skill 完整保留（首因近因双语）、思维模式兜底 bug 修复 |
 | v1.5 | 2026-07-19 | 硬软参数分层（数量=软参数输入框>工具栏，比例/分辨率=硬参数工具栏）、Skill=单张图样式不决定数量、统一数量决策函数 |
 | v1.5.1 | 2026-07-19 | 单 generation 多图泄漏修复（API 返回多图限制+参考图 URL 过滤）、count=1 强制范围扩大到所有直接模式 |
+| v1.6 | 2026-07-20 | LLM 与生图解耦（思维模式 OFF 跳过 LLM 直接生图）、思维模式多轮维度采集（渐进式问答+自定义输入）、LLM 模型选择移入思维模式面板、框选批量发送至 Agent、附件拖拽排序、发送按钮 bug 修复 |
 
 ----
 

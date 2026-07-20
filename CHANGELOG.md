@@ -56,3 +56,18 @@
 - **API 单次返回多图修复**：某些 provider 单次生图调用会返回多张图，导致单个 generation 节点出现多张图。现在限制每个 generation 最多只取 `gen.count` 张图
 - **参考图 URL 过滤**：某些 provider 会在响应中回显输入的参考图 URL，造成「重复」问题。现在过滤掉与参考图 URL 相同的结果
 - **count=1 强制范围扩大**：直接模式下无论 `requestedCount` 是否大于 1，都强制所有 generation 的 `count=1`（之前只在 `requestedCount > 1` 时才强制，存在漏洞）
+
+#### v1.6 — LLM 与生图解耦 + 思维模式多轮维度采集
+- **LLM 与生图解耦**：思维模式 OFF 时前端跳过 LLM，直接构建 generations 并调用生图 API，降低延迟与成本
+- **思维模式多轮维度采集**：从「两阶段流程」重构为「渐进式多维采集」——逐轮提问风格/场景/构图/配色/细节等维度，每轮返回选项 + 自定义输入，所有维度确认后生成最终提示词
+- **参考图分析规则**：思维模式下 LLM 先分析参考图共同特征，再让用户选择保留哪些特征
+- **LLM 模型选择移入思维模式面板**：模型选择栏只保留生图模型，理解模型选择整合到思维模式按钮的下拉面板中（点击思维按钮即展开）
+- **框选批量发送至 Agent**：画布框选图片节点后，底部居中显示「发送至Agent(x张)」按钮，一键批量添加为参考图
+- **附件拖拽排序**：Agent 聊天框中的参考图附件支持拖拽调整顺序
+- **发送按钮 bug 修复**：
+  - 移除 `agentThinkingModelBtn` 的 CSS `display:inline-flex` 覆盖 `hidden` 属性导致按钮挤压发送按钮的问题
+  - `agentSendBtn` 事件监听提前到 `initAgentPanel` 首行，防止中间初始化异常导致监听未注册
+  - 思维模式 OFF 路径补充 `agentSending` 状态管理（`true` → `finally false`），防止按钮卡在 disabled
+  - 页面加载时 `agentSending` 安全重置
+- **`parseAgentResponse` 防御性修复**：所有返回路径补全 `options`/`prompts` 字段，`processAgentLlmResult` 开头添加数组类型检查，消除 "Cannot read properties of undefined (reading 'length')" 错误
+- **点击空白处清除批量发送按钮**：`shell.onclick` 补充 `syncSelectionUi()` 调用

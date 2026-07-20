@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=v1.5.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=v1.5.1784282603"></script>
     <script src="/static/js/i18n.js?v=v1.5.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=v1.5.1784458276">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=v1.5.1784539881">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -133,6 +133,7 @@
             <div id="promptTemplateBody" class="prompt-template-body"></div>
         </div>
         <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
+        <button id="smartSendAgentBtn" class="minimap-arrange-btn" type="button" title="发送至Agent" aria-label="发送至Agent" hidden><i data-lucide="bot"></i><span>发送至Agent</span></button>
         <div id="minimap" class="smart-minimap" aria-hidden="true">
             <div id="minimapContent" class="smart-minimap-content">
                 <div id="minimapViewport" class="smart-minimap-viewport"></div>
@@ -245,7 +246,6 @@
                         <div class="agent-toolbar-dropdown-wrap">
                             <button id="agentModelBtn" class="agent-toolbar-btn" type="button"><span id="agentModelLabel">模型</span><i data-lucide="chevron-down"></i></button>
                             <div id="agentModelPanel" class="agent-dropdown-panel" hidden>
-                                <div class="agent-dropdown-row"><label>理解</label><div class="agent-dropdown-selects" id="agentChatSelects"></div></div>
                                 <div class="agent-dropdown-row"><label>生图</label><div class="agent-dropdown-selects" id="agentGenSelects"></div></div>
                             </div>
                         </div>
@@ -299,14 +299,19 @@
                             </div>
                         </div>
                         <div class="agent-toolbar-spacer"></div>
-                        <button id="agentThinkingBtn" class="agent-thinking-btn" type="button">
-                            <i data-lucide="brain" class="agent-thinking-icon"></i>
-                            <span class="agent-thinking-label">思维</span>
-                            <div class="agent-thinking-tooltip">
-                                <div class="agent-tooltip-title">思维模式</div>
-                                <div class="agent-tooltip-sub">扩写/优化提示词</div>
+                        <div class="agent-toolbar-dropdown-wrap">
+                            <button id="agentThinkingBtn" class="agent-thinking-btn" type="button">
+                                <i data-lucide="brain" class="agent-thinking-icon"></i>
+                                <span class="agent-thinking-label">思维</span>
+                                <div class="agent-thinking-tooltip">
+                                    <div class="agent-tooltip-title">思维模式</div>
+                                    <div class="agent-tooltip-sub">扩写/优化提示词</div>
+                                </div>
+                            </button>
+                            <div id="agentChatModelPanel" class="agent-dropdown-panel" hidden>
+                                <div class="agent-dropdown-row"><label>理解模型</label><div class="agent-dropdown-selects" id="agentChatModelSelects"></div></div>
                             </div>
-                        </button>
+                        </div>
                         <button id="agentSendBtn" class="agent-send-btn" type="button" data-i18n-title="smart.agentSend" title="发送"><i data-lucide="send"></i></button>
                     </div>
                 </div>
@@ -559,6 +564,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=v1.5.1784532860"></script>
+    <script src="/static/js/smart-canvas.js?v=v1.5.1784541866"></script>
 </body>
 </html>

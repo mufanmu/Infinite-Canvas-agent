@@ -26,6 +26,7 @@ const inputPromptPreview = document.getElementById('inputPromptPreview');
 const minimap = document.getElementById('minimap');
 const minimapContent = document.getElementById('minimapContent');
 const smartArrangeBtn = document.getElementById('smartArrangeBtn');
+const smartSendAgentBtn = document.getElementById('smartSendAgentBtn');
 const imageEditModal = document.getElementById('imageEditModal');
 const smartLogModal = document.getElementById('smartLogModal');
 const smartLogList = document.getElementById('smartLogList');
@@ -1275,6 +1276,19 @@ function syncSelectionUi(){
     if(selectedImage.nodeId) touchedIds.add(selectedImage.nodeId);
     world.classList.toggle('smart-multi-selected', ids.length > 1);
     smartArrangeBtn?.classList.toggle('visible', ids.length > 0);
+    // 框选了多张图片节点时显示「发送至Agent」按钮
+    const selectedImgNodes = ids.map(id => nodes.find(n => n.id === id)).filter(n => n && isSmartImageNode(n) && (n.images || []).some(img => img?.url));
+    if(smartSendAgentBtn){
+        if(selectedImgNodes.length > 0){
+            smartSendAgentBtn.hidden = false;
+            smartSendAgentBtn.classList.add('visible');
+            const labelEl = smartSendAgentBtn.querySelector('span');
+            if(labelEl) labelEl.textContent = `发送至Agent(${selectedImgNodes.length}张)`;
+        } else {
+            smartSendAgentBtn.hidden = true;
+            smartSendAgentBtn.classList.remove('visible');
+        }
+    }
     smartNodeElementsByIds(touchedIds).forEach(el => {
         const id = el.dataset.id || '';
         el.classList.toggle('selected', isNodeSelected(id));
@@ -15430,6 +15444,7 @@ function finishSelection(event){
     selectionJustFinished = true;
     selectionBox.style.display = 'none';
     render();
+    syncSelectionUi();
     setTimeout(() => { selectionJustFinished = false; }, 0);
 }
 function groupSelectedNodes(){
@@ -15735,6 +15750,7 @@ shell.onclick = e => {
     closeCreateMenu();
     clearSelection();
     render();
+    syncSelectionUi();
 };
 minimap?.addEventListener('mousedown', e => {
     if(e.button !== 0) return;
@@ -15746,9 +15762,37 @@ minimap?.addEventListener('mousedown', e => {
 });
 smartArrangeBtn?.addEventListener('mousedown', e => e.stopPropagation());
 smartArrangeBtn?.addEventListener('click', e => {
-    e.preventDefault();
-    e.stopPropagation();
-    arrangeSelectedSmartNodes();
+e.preventDefault();
+e.stopPropagation();
+arrangeSelectedSmartNodes();
+});
+smartSendAgentBtn?.addEventListener('mousedown', e => e.stopPropagation());
+smartSendAgentBtn?.addEventListener('click', e => {
+e.preventDefault();
+e.stopPropagation();
+// 收集所有选中节点的第一张图片，批量发送至 Agent
+const ids = selectedNodeIds();
+const imgNodes = ids.map(id => nodes.find(n => n.id === id)).filter(n => n && isSmartImageNode(n) && (n.images || []).some(img => img?.url));
+if(!imgNodes.length){ toast('没有选中的图片节点'); return; }
+if(!agentOpen) toggleAgentPanel(true);
+if(!agentState) return;
+if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+const _genProv = agentGenProviders().some(p => p.id === agentState.genProvider) ? agentState.genProvider : (agentGenProviders()[0]?.id || '');
+const _refMax = _genProv ? providerMaxReferenceImages(_genProv) : AGENT_LLM_IMAGE_MAX;
+let added = 0, skipped = 0;
+for(const node of imgNodes){
+if(agentState.attachments.length >= _refMax){ skipped++; continue; }
+const item = imageForDisplay(node.images[0]);
+if(!item?.url) continue;
+if(agentState.attachments.some(a => a.url === item.url)){ skipped++; continue; }
+agentState.attachments.push({url:item.url, name:item.name || node.title || 'image', nodeId:node.id, x:Number(node.x) || 0, y:Number(node.y) || 0});
+added++;
+}
+renderAgentAttachments();
+saveAgentState();
+if(added > 0 && skipped > 0) toast(`已发送 ${added} 张至 Agent，${skipped} 张因重复或超限跳过`);
+else if(added > 0) toast(`已发送 ${added} 张至 Agent`);
+else if(skipped > 0) toast(`参考图已达上限或全部重复`);
 });
 window.onmousemove = e => {
     lastMouseWorld = screenToWorld(e);
@@ -17114,11 +17158,12 @@ function agentUpdateToolbarLabels(){
     }
 }
 function agentMoveSelectsToDropdown(){
-    const chatSelects = document.getElementById('agentChatSelects');
+    const chatModelSelects = document.getElementById('agentChatModelSelects');
     const genSelects = document.getElementById('agentGenSelects');
-    if(chatSelects && agentChatProvider && agentChatModel){
-        chatSelects.appendChild(agentChatProvider);
-        chatSelects.appendChild(agentChatModel);
+    // 将 LLM 模型选择器放到思维模式面板中
+    if(chatModelSelects && agentChatProvider && agentChatModel){
+        chatModelSelects.appendChild(agentChatProvider);
+        chatModelSelects.appendChild(agentChatModel);
     }
     if(genSelects && agentGenProvider && agentGenModel){
         genSelects.appendChild(agentGenProvider);
@@ -17127,8 +17172,10 @@ function agentMoveSelectsToDropdown(){
     // 确保下拉面板初始隐藏
     const modelPanel = document.getElementById('agentModelPanel');
     const paramsPanel = document.getElementById('agentParamsPanel');
+    const chatModelPanel = document.getElementById('agentChatModelPanel');
     if(modelPanel) modelPanel.hidden = true;
     if(paramsPanel) paramsPanel.hidden = true;
+    if(chatModelPanel) chatModelPanel.hidden = true;
 }
 function renderAgentModelSelectors(){
     if(!agentState) return;
@@ -17214,7 +17261,7 @@ function renderAgentAttachments(){
         html += `<div class="agent-attach-skill"><i data-lucide="file-text"></i><span class="agent-attach-skill-name">${escapeHtml(skill.name || 'skill.md')}</span><button type="button" data-agent-skill-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     attachments.forEach((att, i) => {
-        html += `<div class="agent-attach-chip" data-agent-att-jump="${i}" title="${escapeHtml(att.name || 'image')}"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
+        html += `<div class="agent-attach-chip" draggable="${attachments.length > 1 ? 'true' : 'false'}" data-agent-att-index="${i}" title="${escapeHtml(att.name || 'image')}"><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     agentAttachRow.innerHTML = html;
     if(window.lucide) lucide.createIcons();
@@ -17234,10 +17281,10 @@ function renderAgentAttachments(){
             saveAgentState();
         };
     });
-    agentAttachRow.querySelectorAll('[data-agent-att-jump]').forEach(el => {
+    agentAttachRow.querySelectorAll('[data-agent-att-index]').forEach(el => {
         el.onclick = e => {
             if(e.target.closest('[data-agent-att-remove]')) return;
-            const att = agentState.attachments[Number(el.dataset.agentAttJump)];
+            const att = agentState.attachments[Number(el.dataset.agentAttIndex)];
             if(!att) return;
             // 跳转到画布中图片位置
             if(att.nodeId){
@@ -17255,6 +17302,54 @@ function renderAgentAttachments(){
                 agentCenterOnPoint(Number(att.x) || 0, Number(att.y) || 0);
             }
         };
+        // 拖拽排序
+        el.addEventListener('dragstart', e => {
+            e.stopPropagation();
+            el.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', el.dataset.agentAttIndex);
+        });
+        el.addEventListener('dragend', e => {
+            e.stopPropagation();
+            el.classList.remove('dragging');
+            agentAttachRow.querySelectorAll('.agent-attach-chip').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+        });
+        el.addEventListener('dragover', e => {
+            const fromIdx = Number(e.dataTransfer.getData('text/plain'));
+            const toIdx = Number(el.dataset.agentAttIndex);
+            if(!Number.isFinite(fromIdx) || fromIdx < 0 || fromIdx === toIdx) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            agentAttachRow.querySelectorAll('.agent-attach-chip').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+            const rect = el.getBoundingClientRect();
+            const placement = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+            el.classList.add(placement === 'before' ? 'drop-before' : 'drop-after');
+        });
+        el.addEventListener('dragleave', e => {
+            if(el.contains(e.relatedTarget)) return;
+            el.classList.remove('drop-before', 'drop-after');
+        });
+        el.addEventListener('drop', e => {
+            const fromIdx = Number(e.dataTransfer.getData('text/plain'));
+            const toIdx = Number(el.dataset.agentAttIndex);
+            if(!Number.isFinite(fromIdx) || fromIdx < 0 || fromIdx === toIdx) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const rect = el.getBoundingClientRect();
+            const placement = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+            agentAttachRow.querySelectorAll('.agent-attach-chip').forEach(c => c.classList.remove('drop-before', 'drop-after'));
+            // 重排 attachments 数组
+            const atts = agentState.attachments.slice();
+            const [moved] = atts.splice(fromIdx, 1);
+            let insertAt = toIdx;
+            if(placement === 'after') insertAt += 1;
+            if(fromIdx < insertAt) insertAt -= 1;
+            atts.splice(Math.max(0, Math.min(atts.length, insertAt)), 0, moved);
+            agentState.attachments = atts;
+            renderAgentAttachments();
+            saveAgentState();
+        });
     });
 }
 async function agentAttachFiles(files){
@@ -17702,63 +17797,71 @@ When a skill document is provided, every prompt you generate MUST fully and verb
     // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令
     const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
     if(thinkingModeOn){
-        parts.push(`当前为思维模式（用户参与决策模式）。核心原则：用户在生图前必须看到并确认每一条提示词，确认后才统一生图。
+        parts.push(`当前为思维模式（渐进式多维采集模式）。核心原则：通过多轮提问逐步收集用户需求，所有维度确认后生成详细提示词。
 
-【参数权重 / Parameter Priority】（由系统决定，你无需判断，也不要在prompt里加数量/比例/分辨率描述）
-- 出图数量：输入框显式要求 > 工具栏设置（软参数）
-- 比例/分辨率：工具栏说了算（硬参数），输入框不覆盖
-- 你只需按系统给定的数量返回对应条数，不要自行增减。
+【流程规则 / Process Rules】
 
-【两阶段流程 / Two-Stage Flow】
+总体流程：逐轮提问维度 → 用户选择 → 下一轮提问下一个维度 → ... → 所有维度确认 → 生成最终提示词
 
-■ 阶段一：风格引导（仅当输入"缺风格"时触发）
-判断标准——用户的输入有6个信息维度：①主体 ②风格(画风/艺术流派) ③场景/背景 ④配色 ⑤构图 ⑥细节特征。
-- 如果只有①主体，缺②风格 → 必须返回 2-4 个 options（风格/方向选项）让用户选择，不要直接返回 prompts。
-  选项示例：[水墨风、油画风、赛博朋克、Q版卡通] 或 [极简logo、复古徽章、几何扁平、手绘插画]
-  返回 {"reply":"请选择一个风格方向：","options":[{"label":"水墨风","value":"水墨风"},...],"prompts":[],"generations":[]}
-- 如果②风格已存在（即使简短如"水墨风的狗"），跳过阶段一，直接进入阶段二。
+轮次判断规则：
+- 如果还有 ≥2 个维度未确认 → 返回 options，继续提问
+- 如果只剩 1 个维度未确认 → 返回 options，最后一轮提问  
+- 如果所有维度已确认 → 生成最终提示词（返回 prompts）
 
-■ 阶段二：扩写/优化 + 确认（用户选了风格后，或输入本身已有风格时进入）
-根据输入完整度分三档处理：
+维度优先级（按重要性排序）：
+1. 风格 (画风/艺术流派) - 如水墨风、油画风、赛博朋克、Q版卡通
+2. 场景/背景 - 如留白山水、竹林、雪景、庭院、城市街道
+3. 构图 - 如正面站姿、仰视特写、奔跑动态、侧卧休息、三分法
+4. 配色 - 如暖色调、冷色调、低饱和度、高对比度
+5. 细节特征 - 如毛发质感、光影效果、材质表现、装饰元素
+6. 其他补充 - 如文字要求、品牌元素、特殊效果
 
-【档A：大幅扩写】——有主体+风格，但场景/配色/构图/细节缺失3项以上
-你必须大幅扩写，补全所有缺失维度，生成完整可直接生图的中文提示词。
-示例：用户输入"一只狗，水墨风" → 你扩写为"一只水墨风格的西高地白犬，中国传统水墨画技法，淡墨晕染毛发，浓墨点睛，大量留白营造意境，毛笔笔触可见，站姿端正微微侧头，眼神温和灵动，背景大面积留白，右下角有朱砂印章，意境悠远，水墨画质感，宣纸纹理"
+【参考图分析规则】
 
-【档B：适度优化】——主体+风格+场景+配色+构图+细节大部分都有
-不要重写用户的核心描述，只做适度优化：补充技术参数（如"高质量、印刷级精度"）、理顺语句、确保完整性。
-如果输入已经足够完整专业，可以基本保持原样，但在 reply 里说明"你的提示词已较完整，可直接确认或微调"。
-示例：用户输入"海报设计，大师级排版，极繁主义，配色协调，波点，半调图案..." → 你保持核心描述，补充"高质量海报输出，印刷级精度"即可，不要把"极繁主义"改成"极简主义"，不要删减用户写的细节。
+当用户上传了参考图时，第一轮或第二轮必须先分析参考图并提问：
+- 返回 reply 说明参考图的共同特征（风格、配色、构图、光影等）
+- 选项必须包含用户对参考图特征的选择（全部保留/部分保留/不保留）
+- 示例：{"reply":"我看到了7张参考图，它们有共同的特征：低饱和度配色、极简构图、柔和光影。你希望产品图保留哪些特征？","options":[{"label":"全部保留","value":"保留参考图的所有视觉特征：低饱和度配色、极简构图、柔和光影"},{"label":"只保留配色","value":"只保留参考图的低饱和度配色"},{"label":"只保留构图","value":"只保留参考图的极简构图"},{"label":"自定义输入","value":"CUSTOM_INPUT"}],"collected":{"参考图特征":"已分析"}}
 
-【档C：修改请求】——用户说"换成像素风""改成夜景"等
-返回 prompts，use_last_outputs 设为 true（引用上一轮图片）。在已有基础上做修改，保留未要求改动的部分。
+【选项规则】
 
-【返回规则】
-1. 只返回 prompts 数组，不要返回 generations 数组。
-2. 每个 prompt 对象的 count 固定为 1。不要用 count>1。
-3. 系统要求生成N张图时（见上方"出图数量"），prompts 数组返回恰好N条。
-   每条必须是完整的、可直接生图的中文提示词。
-   N条之间在主题方向/变体方向上有差异（不是换风格，而是在同一风格下做变体）。
-   例如用户选了"水墨风"+系统要3张 → 返回3条水墨风prompt，分别画不同姿态/场景/氛围的狗。
-   【重要】每条 prompt 必须在姿态、场景、构图、光线、配色中至少3个维度有实质差异。
-   不能只换颜色或微调细节，否则生成的图会几乎一样。
-   如果只返回1条让前端补充，补充的变体质量会远不如你直接写的。请务必返回恰好N条。
-4. 每个 prompt 对象包含：prompt(中文提示词), count(固定为1), use_last_outputs(bool), use_attachments(bool)。
-5. 用户会逐条确认（确认/修改/重新生成），全部确认后才统一生图。
-6. 所有prompt必须中文，包含主体/风格/构图/光线/色彩/细节/氛围。
-7. 文字规则：默认prompt不包含文字内容，除非skill文档明确要求或用户明确要求"加文字"。
-${hasSkills ? '8. 每条 prompt 必须完整包含 skill 文档的所有描述内容，只在主题/变体上做差异化（见上方"skill 完整保留"规则）。Skill 描述单张图样式，不决定出图数量。' : ''}`);
+- 每轮返回 2-4 个选项（推荐数量为3）
+- 每个选项必须是简洁明确的值，不是长句子
+- 每轮 options 末尾必须追加一个 {"label":"自定义输入","value":"CUSTOM_INPUT"} 选项
+- 选项示例：[水墨风, 油画风, 赛博朋克, 自定义输入]
+
+【返回字段】
+
+每轮必须返回以下字段：
+{
+  "reply": "简短的问题描述（如'请选择风格方向：'）",
+  "options": [{"label":"选项1","value":"选项1值"}, {"label":"选项2","value":"选项2值"}, {"label":"自定义输入","value":"CUSTOM_INPUT"}],
+  "collected": {"维度1":"已确认值1", "维度2":"已确认值2", ...},  // 累积已确认的维度
+  "next_dimension": "场景",  // 下一轮要问的维度
+  "remaining_dimensions": ["场景", "构图", "配色"],  // 剩余未确认的维度
+  "prompts": [],  // 问答阶段始终为空
+  "generations": []  // 问答阶段始终为空
+}
+
+【最终轮规则】
+
+当所有维度确认后（remaining_dimensions 为空或用户明确要求）：
+- 返回 prompts 数组，每条是完整可直接生图的中文提示词
+- 提示词要综合所有 collected 维度的信息
+- 系统要求生成N张图时（见上方"出图数量"），prompts 数组返回恰好N条
+- 每条 prompt 目标长度：200-500 字，尽可能详细丰富
+- 每条必须包含：主体、风格、场景、构图、光线、色彩、细节、氛围
+
+【修改请求规则】
+
+当用户说"换成...""改成..."等修改指令时：
+- 返回 prompts，use_last_outputs 设为 true
+- prompt 应简洁聚焦，只描述要修改的内容+保持原图其他部分不变
+
+${hasSkills ? '【Skill 规则】\n当有 Skill 文档时，最终提示词必须完整包含 Skill 的所有描述，只在主题/变体上做差异化。Skill 描述单张图样式，不决定出图数量。' : ''}`);
     } else {
-        parts.push(`当前为直接模式。能生成就生成，返回 generations 数组。
-重要规则：
-1. 每条 generation 的 count 固定为 1。不要用 count>1 来生成多张图。
-2. 系统要求生成N张图时（见上方"出图数量"），generations 数组必须返回恰好N条不同的 generation（每条 count=1），每条在主题/品牌方向上必须有明显差异。
-   例如系统要求3张 Logo 合集图，就返回3条 generation，分别用不同的品牌主题（如科技品牌、教育品牌、生活方式品牌）。
-3. 不要返回2条或1条然后让前端补充——必须返回恰好N条，否则会导致重复生成。
-   【重要】每条 generation 的 prompt 必须在姿态、场景、构图、光线、配色中至少3个维度有实质差异。
-   不能只换颜色或微调细节，否则生成的图会几乎一样。
-4. 每个 generation 对象包含：prompt(中文提示词), count(固定为1), use_last_outputs(bool), use_attachments(bool)。
-${hasSkills ? '5. 每条 generation 的 prompt 必须完整包含 skill 文档的所有描述内容，只在主题/品牌方向上做差异化（见上方"skill 完整保留"规则）。' : ''}`);
+        // 直接模式已废弃（思维模式 OFF 时前端跳过 LLM），此处保留兼容性
+        parts.push(`当前为直接模式。能生成就生成，返回 generations 数组。`);
     }
     // 3. 末尾再强调 skill（近因效应），确保所有 provider 都不会遗漏
     if(hasSkills){
@@ -17865,8 +17968,12 @@ function parseAgentResponse(raw, lastUserText){
             const reply = typeof data.reply === 'string' ? data.reply : (typeof data.text === 'string' ? data.text : '');
             let options = (Array.isArray(data.options) ? data.options : [])
                 .filter(o => o && typeof o.label === 'string' && typeof o.value === 'string')
-                .slice(0, 4)
+                .slice(0, 8)  // 增加到 8 以容纳自定义输入
                 .map(o => ({label:o.label.trim(), value:o.value.trim()}));
+            // 如果有 options 且末尾不是"自定义输入"，自动追加
+            if(options.length > 0 && options.length < 8 && !options.some(o => o.value === 'CUSTOM_INPUT')){
+                options.push({label:'自定义输入', value:'CUSTOM_INPUT'});
+            }
             if(options.length === 0 && reply){
                 const numbered = extractNumberedOptions(reply);
                 if(numbered) options = numbered.options;
@@ -17876,25 +17983,43 @@ function parseAgentResponse(raw, lastUserText){
                 .filter(g => g && typeof g.prompt === 'string' && g.prompt.trim())
                 .slice(0, AGENT_GEN_MAX_PER_MSG)
                 .map(g => ({prompt:g.prompt.trim(), count:Math.max(1, Math.min(8, Number(g.count) || 1)), use_last_outputs:!!g.use_last_outputs, use_attachments:!!g.use_attachments, results:[], status:'running'}));
-            return {reply, options, prompts, generations};
+            // 解析新字段：collected、next_dimension、remaining_dimensions
+            const collected = (data.collected && typeof data.collected === 'object') ? data.collected : {};
+            const nextDimension = typeof data.next_dimension === 'string' ? data.next_dimension : '';
+            const remainingDimensions = Array.isArray(data.remaining_dimensions) ? data.remaining_dimensions : [];
+            return {reply, options, prompts, generations, collected, next_dimension, remaining_dimensions};
         } catch(e) { /* 尝试下一个候选 */ }
     }
     // JSON 解析失败时的 fallback 链
     const numberedFallback = extractNumberedOptions(text);
     if(numberedFallback){
-        return {reply:numberedFallback.reply || text, options:numberedFallback.options, prompts:[], generations:[]};
+        const fallbackOptions = numberedFallback.options || [];
+        // 自动追加自定义输入选项
+        if(fallbackOptions.length > 0 && fallbackOptions.length < 8 && !fallbackOptions.some(o => o.value === 'CUSTOM_INPUT')){
+            fallbackOptions.push({label:'自定义输入', value:'CUSTOM_INPUT'});
+        }
+        return {reply:numberedFallback.reply || text, options:fallbackOptions, prompts:[], generations:[], collected:{}, next_dimension:'', remaining_dimensions:[]};
     }
     const clarifyOptions = extractClarifyOptions(text, lastUserText);
     if(clarifyOptions){
-        return {reply:text, options:clarifyOptions, prompts:[], generations:[]};
+        const fallbackOptions = clarifyOptions || [];
+        // 自动追加自定义输入选项
+        if(fallbackOptions.length > 0 && fallbackOptions.length < 8 && !fallbackOptions.some(o => o.value === 'CUSTOM_INPUT')){
+            fallbackOptions.push({label:'自定义输入', value:'CUSTOM_INPUT'});
+        }
+        return {reply:text, options:fallbackOptions, prompts:[], generations:[], collected:{}, next_dimension:'', remaining_dimensions:[]};
     }
-    return {reply:text, generations:[]};
+    return {reply:text, options:[], prompts:[], generations:[], collected:{}, next_dimension:'', remaining_dimensions:[]};
 }
 // 处理 LLM 返回结果：解析、兜底、创建 assistant 消息、运行生图
 // 提取为独立函数，以便刷新恢复时复用
 async function processAgentLlmResult(result, text, attachments, userMsg){
-    const parsed = parseAgentResponse(result.text || '', text);
-    // 提前计算思维模式状态，使兜底逻辑能感知
+const parsed = parseAgentResponse(result.text || '', text);
+// 防御性检查：确保 options/prompts/generations 始终是数组
+if(!Array.isArray(parsed.options)) parsed.options = [];
+if(!Array.isArray(parsed.prompts)) parsed.prompts = [];
+if(!Array.isArray(parsed.generations)) parsed.generations = [];
+// 提前计算思维模式状态，使兜底逻辑能感知
     const bypassThinking = userMsg?.bypassThinking === true;
     const thinkingModeOn = agentState?.thinkingMode && !bypassThinking;
     // 生图意图兜底 + 修改意图检测
@@ -18100,10 +18225,21 @@ async function processAgentLlmResult(result, text, attachments, userMsg){
     }
     // 直接模式下，无论 requestedCount 多少，强制所有 generation 的 count=1
     // （防止 LLM 返回 count>1 导致同一 prompt 发多次请求、生成重复图）
-    if(!thinkingModeOn && parsed.generations.length > 0){
-        parsed.generations.forEach(g => { g.count = 1; });
-    }
-    const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply, options:parsed.options || [], prompts:parsed.prompts || [], generations:parsed.generations, ts:Date.now()};
+if(!thinkingModeOn && parsed.generations.length > 0){
+    parsed.generations.forEach(g => { g.count = 1; });
+}
+const assistantMsg = {
+    id:uid('am'), 
+    role:'assistant', 
+    text:parsed.reply, 
+    options:parsed.options || [], 
+    prompts:parsed.prompts || [], 
+    generations:parsed.generations, 
+    ts:Date.now(),
+    collected: parsed.collected || {},
+    next_dimension: parsed.next_dimension || '',
+    remaining_dimensions: parsed.remaining_dimensions || []
+};
     // P2-12: 记录请求数量到消息，用于卡片显示校验
     if(requestedCount > 0) assistantMsg.requestedCount = requestedCount;
     if(assistantMsg.prompts.length > 0){
@@ -18142,6 +18278,101 @@ async function sendAgentMessage(){
     const text = String(agentInput?.value || '').trim();
     const attachments = (Array.isArray(agentState.attachments) ? agentState.attachments : []).slice();
     if(!text && !attachments.length) return;
+    
+    // ============ 改造：思维模式 OFF 时跳过 LLM，直接生图 ============
+    const thinkingModeOn = agentState?.thinkingMode;
+    if(!thinkingModeOn){
+        // 思维模式关闭：直接构建 generations 并生图
+        const genProviderId = agentState.genProvider;
+        const genModel = agentState.genModel;
+        
+        // 检查生图模型是否配置
+        const genProviders = agentGenProviders();
+        const genProvider = genProviders.find(p => p.id === genProviderId) || genProviders[0];
+        if(!genProvider){ toast(tr('smart.agentNoProviders') || '未配置生图模型'); return; }
+        
+        const models = providerImageModels(genProvider.id) || [];
+        const model = genModel && models.includes(genModel) ? genModel : (models[0] || '');
+        if(!model){ toast(tr('smart.agentNoProviders') || '生图模型不可用'); return; }
+        
+        // 计算生图参数
+        const ratio = agentState.genRatio || 'square';
+        const resolution = agentState.genResolution || '1k';
+        const count = Math.max(1, Math.min(8, Number(agentState.genCount) || 1));
+        
+        // 构建 generations
+        const generations = [];
+        const _finalCount = resolveFinalGenCount(text);
+        const requestedCount = _finalCount.count > 1 ? _finalCount.count : count;
+        
+        // 判断是否是修改请求
+        const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
+        const isModifyRequest = userModifyRe.test(text);
+        const useLastOutputs = isModifyRequest;
+        const useAttachments = attachments.length > 0;
+        
+        // 根据数量构建多条 generations（如果需要）
+        for(let i = 0; i < Math.max(requestedCount, 1); i++){
+            const promptText = requestedCount > 1 ? `${text}（变体${i + 1}，不同构图/角度/场景）` : text;
+            generations.push({
+                prompt: promptText,
+                count: 1,
+                use_last_outputs: useLastOutputs,
+                use_attachments: useAttachments,
+                results: [],
+                status: 'running'
+            });
+        }
+        
+        // 创建 user 消息
+        const userMsg = {
+            id: uid('am'),
+            role: 'user',
+            text,
+            images: attachments,
+            ts: Date.now()
+        };
+        if(requestedCount > 1) userMsg.requestedCount = requestedCount;
+        agentState.messages.push(userMsg);
+        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+        agentState.attachments = [];
+        if(agentInput) agentInput.value = '';
+        renderAgentAttachments();
+        
+        // 创建 assistant 消息（直接生图模式）
+        const assistantMsg = {
+            id: uid('am'),
+            role: 'assistant',
+            text: '',
+            options: [],
+            prompts: [],
+            generations: generations,
+            ts: Date.now(),
+            requestedCount: requestedCount
+        };
+        agentState.messages.push(assistantMsg);
+        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+        agentSending = true;
+        saveAgentState();
+        renderAgentMessages();
+        
+        // 直接执行生图
+        try {
+            await runAgentGenerations(assistantMsg, userMsg);
+        } catch(e) {
+            assistantMsg.generations.forEach(g => { g.status = 'failed'; g.error = String(e.message || e); });
+            renderAgentMessages();
+            saveAgentState();
+        } finally {
+            agentSending = false;
+            renderAgentMessages();
+            saveAgentState();
+        }
+        return;
+    }
+    // ============ 改造结束 ============
+    
+    // 思维模式开启：走原有 LLM 流程
     if(!chatApiProviders().length){ toast(tr('smart.agentNeedChatModel')); return; }
     const provider = resolveChatProviderId(agentState.chatProvider);
     const model = resolveChatModel(agentState.chatModel, provider);
@@ -18176,6 +18407,15 @@ async function sendAgentMessage(){
     //   - gemini-cli（agy）：system_prompt 被拼成普通文本"系统要求：..."，优先级低，易忽略 ✗
     // 在 user message 里追加提醒，确保所有 provider 都能看到 skill 要求
     let messageText = text || '(please help me edit these images)';
+    // 多轮对话：注入已确认的维度信息
+    const lastAssistant = [...(agentState.messages || [])].reverse().find(m => m.role === 'assistant');
+    const prevCollected = lastAssistant?.collected || {};
+    if(Object.keys(prevCollected).length > 0){
+        messageText += `${AGENT_NL}${AGENT_NL}【已确认维度】以下维度已在之前的对话中确认：`;
+        for(const [key, value] of Object.entries(prevCollected)){
+            messageText += `${AGENT_NL}- ${key}：${value}`;
+        }
+    }
     // 前端数量决策：输入框显式要求 > 工具栏设置（软参数覆盖）
     const _finalCount = resolveFinalGenCount(text);
     // 阶段二继承：如果当前没有明确请求多张，但上一条 user 消息有 requestedCount，继承它
@@ -18817,7 +19057,11 @@ function initAgentInputResize(){
 }
 function initAgentPanel(){
     if(!agentPanel) return;
+    // 提前绑定发送按钮事件，确保即使后续初始化出错发送按钮也能用
+    agentSendBtn?.addEventListener('click', () => sendAgentMessage());
     loadAgentState();
+    // 如果没有恢复中的任务，确保 agentSending 重置为 false
+    if(!_agentRecoveryInProgress) agentSending = false;
     agentMoveSelectsToDropdown();
     renderAgentModelSelectors();
     renderAgentAttachments();
@@ -18831,8 +19075,10 @@ function initAgentPanel(){
     function closeAllDropdowns(){
         if(modelPanel) modelPanel.hidden = true;
         if(paramsPanel) paramsPanel.hidden = true;
+        const chatModelPanel = document.getElementById('agentChatModelPanel');
+        if(chatModelPanel) chatModelPanel.hidden = true;
     }
-    function showDropdown(btn, panel){
+    function showDropdown(btn, panel, opts){
         if(!btn || !panel) return;
         // 把面板移到 document.body 中，避免被 Agent 面板的 backdrop-filter 遮挡
         if(panel.parentElement !== document.body) document.body.appendChild(panel);
@@ -18843,10 +19089,19 @@ function initAgentPanel(){
         const panelHeight = panel.offsetHeight;
         const panelWidth = panel.offsetWidth;
         panel.style.visibility = '';
-        // 水平位置：确保面板不会超出屏幕右边界
-        const maxLeft = window.innerWidth - panelWidth - 8;
-        panel.style.left = Math.min(Math.max(8, rect.left), Math.max(8, maxLeft)) + 'px';
-        panel.style.right = 'auto';
+        // 水平位置
+        const alignRight = opts && opts.alignRight;
+        if(alignRight){
+            // 右对齐：面板右边缘对齐按钮右边缘，向左展开
+            const rightEdge = window.innerWidth - rect.right;
+            panel.style.right = Math.max(8, rightEdge) + 'px';
+            panel.style.left = 'auto';
+        } else {
+            // 默认左对齐：确保面板不会超出屏幕右边界
+            const maxLeft = window.innerWidth - panelWidth - 8;
+            panel.style.left = Math.min(Math.max(8, rect.left), Math.max(8, maxLeft)) + 'px';
+            panel.style.right = 'auto';
+        }
         // 垂直位置：优先在按钮上方显示，如果空间不够则在下方显示
         const spaceAbove = rect.top;
         const spaceBelow = window.innerHeight - rect.bottom;
@@ -18859,6 +19114,7 @@ function initAgentPanel(){
         }
         panel.hidden = false;
     }
+    window.__agentShowDropdown = showDropdown;
     modelBtn?.addEventListener('click', e => {
         e.stopPropagation();
         const wasHidden = modelPanel?.hidden;
@@ -18871,6 +19127,7 @@ function initAgentPanel(){
         closeAllDropdowns();
         if(wasHidden) showDropdown(paramsBtn, paramsPanel);
     });
+    const chatModelPanel = document.getElementById('agentChatModelPanel');
     document.addEventListener('pointerdown', e => {
         if(!e.target.closest('.agent-toolbar-dropdown-wrap') && !e.target.closest('.agent-dropdown-panel')) closeAllDropdowns();
     }, true);
@@ -18956,22 +19213,34 @@ function initAgentPanel(){
         agentAttachFiles(agentImageInput.files);
         agentImageInput.value = '';
     });
-    agentSendBtn?.addEventListener('click', () => sendAgentMessage());
-    // 思维模式开关按钮
-    const agentThinkingBtn = document.getElementById('agentThinkingBtn');
-    function syncAgentThinkingBtn(){
-        if(agentThinkingBtn){
-            agentThinkingBtn.classList.toggle('active', !!agentState?.thinkingMode);
+// 思维模式开关按钮
+const agentThinkingBtn = document.getElementById('agentThinkingBtn');
+function syncAgentThinkingBtn(){
+    if(agentThinkingBtn){
+        agentThinkingBtn.classList.toggle('active', !!agentState?.thinkingMode);
+    }
+    // 思维模式关闭时收起理解模型下拉面板
+    if(!agentState?.thinkingMode){
+        const chatModelPanel = document.getElementById('agentChatModelPanel');
+        if(chatModelPanel) chatModelPanel.hidden = true;
+    }
+}
+syncAgentThinkingBtn();
+agentThinkingBtn?.addEventListener('click', () => {
+    if(!agentState) return;
+    agentState.thinkingMode = !agentState.thinkingMode;
+    syncAgentThinkingBtn();
+    saveAgentState();
+    toast(agentState.thinkingMode ? '思维模式已开启：扩写/优化提示词' : '思维模式已关闭：直接生成');
+    // 开启思维模式时，展开理解模型选择面板（右对齐，避免覆盖发送按钮）
+    if(agentState.thinkingMode){
+        const chatModelPanel = document.getElementById('agentChatModelPanel');
+        const thinkingBtn = document.getElementById('agentThinkingBtn');
+        if(chatModelPanel && thinkingBtn && window.__agentShowDropdown){
+            window.__agentShowDropdown(thinkingBtn, chatModelPanel, {alignRight:true});
         }
     }
-    syncAgentThinkingBtn();
-    agentThinkingBtn?.addEventListener('click', () => {
-        if(!agentState) return;
-        agentState.thinkingMode = !agentState.thinkingMode;
-        syncAgentThinkingBtn();
-        saveAgentState();
-        toast(agentState.thinkingMode ? '思维模式已开启：扩写/优化提示词' : '思维模式已关闭：直接生成');
-    });
+});
     agentInput?.addEventListener('input', () => {
         const val = agentInput.value;
         const cursorPos = agentInput.selectionStart || 0;
