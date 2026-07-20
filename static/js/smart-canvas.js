@@ -17912,7 +17912,7 @@ Reply with raw JSON only (no markdown, no extra text):
 Fields: "reply"=对话回复; "options"=[{label,value}]按钮选项; "collected"=已确认的维度字典; "next_dimension"=下一轮维度; "remaining_dimensions"=剩余维度数组; "prompts"=待确认的中文提示词（仅最终轮返回）; "generations"=立即生成的图片（思维模式下始终为空）.
 
 所有prompt必须中文，包含主体/风格/构图/光线/色彩/细节/氛围
-文字规则：默认情况下prompt不要包含文字内容（标题、对白、台词、旁白、字幕），只描述画面视觉元素");
+文字规则：默认情况下prompt不要包含文字内容（标题、对白、台词、旁白、字幕），只描述画面视觉元素`);
     } else {
         parts.push(AGENT_FORMAT_INSTRUCTION);
     }
@@ -18130,6 +18130,97 @@ function extractJsonBlocks(text){
     }
     return blocks;
 }
+// ★ 修复 LLM 返回的常见 JSON 格式问题
+// 处理：尾随逗号、单引号、未加引号的键、注释、智能引号等
+function repairJsonString(str){
+    if(!str || typeof str !== 'string') return str;
+    let s = str;
+    // 1. 移除行注释 // ... 和块注释 /* ... */
+    s = s.replace(/\/\*[\s\S]*?\*\//g, '');
+    // 行注释：只在字符串外移除（简单处理：不匹配引号内的 //）
+    s = s.replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+    // 2. 智能引号 → 普通双引号
+    s = s.replace(/[\u201c\u201d\u201e\u201f]/g, '"');
+    s = s.replace(/[\u2018\u2019\u201a\u201b]/g, "'");
+    // 3. 单引号字符串 → 双引号字符串（仅对键值对中的值）
+    // 匹配 : '...' 或 : '...,' 模式
+    s = s.replace(/:\s*'([^']*)'/g, ': "$1"');
+    // 4. 未加引号的键 → 加引号（匹配 { key: 或 , key: 模式，key 为字母/数字/下划线）
+    s = s.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+    // 5. 尾随逗号（} 或 ] 前的逗号）
+    s = s.replace(/,(\s*[}\]])/g, '$1');
+    // 6. 处理字符串内未转义的换行符（JSON 标准不允许字符串内有 literal newline）
+    // 将字符串值中的 literal \n \r \t 替换为转义形式
+    s = s.replace(/"((?:[^"\\]|\\.)*)"/g, (match, inner) => {
+        // inner 是字符串内容（已处理转义）
+        // 如果包含 literal newline，替换为 \n
+        const fixed = inner.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+        return '"' + fixed + '"';
+    });
+    return s;
+}
+// ★ 用正则从原始文本中提取 JSON 字段（最后兜底）
+function extractFieldsWithRegex(text){
+    const result = { reply:'', options:[], prompts:[], generations:[], collected:{}, next_dimension:'', remaining_dimensions:[] };
+    // 提取 reply
+    const replyMatch = text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if(replyMatch){
+        try { result.reply = JSON.parse('"' + replyMatch[1] + '"'); } catch(e){ result.reply = replyMatch[1]; }
+    }
+    // 提取 options（简单提取 label/value 对）
+    const optionsMatch = text.match(/"options"\s*:\s*\[([\s\S]*?)\]/);
+    if(optionsMatch){
+        const optRe = /"label"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"value"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+        let m;
+        while((m = optRe.exec(optionsMatch[1])) !== null){
+            try {
+                const label = JSON.parse('"' + m[1] + '"');
+                const value = JSON.parse('"' + m[2] + '"');
+                result.options.push({label, value});
+            } catch(e){
+                result.options.push({label:m[1], value:m[2]});
+            }
+        }
+    }
+    // 提取 prompts
+    const promptsMatch = text.match(/"prompts"\s*:\s*\[([\s\S]*?)\]/);
+    if(promptsMatch){
+        const promptRe = /"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+        let m;
+        while((m = promptRe.exec(promptsMatch[1])) !== null){
+            try {
+                const prompt = JSON.parse('"' + m[1] + '"');
+                result.prompts.push({prompt, count:1, use_last_outputs:false, use_attachments:false, status:'pending'});
+            } catch(e){
+                result.prompts.push({prompt:m[1], count:1, use_last_outputs:false, use_attachments:false, status:'pending'});
+            }
+        }
+    }
+    // 提取 generations
+    const gensMatch = text.match(/"generations"\s*:\s*\[([\s\S]*?)\]/);
+    if(gensMatch){
+        const genRe = /"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+        let m;
+        while((m = genRe.exec(gensMatch[1])) !== null){
+            try {
+                const prompt = JSON.parse('"' + m[1] + '"');
+                result.generations.push({prompt, count:1, use_last_outputs:false, use_attachments:false, results:[], status:'running'});
+            } catch(e){
+                result.generations.push({prompt:m[1], count:1, use_last_outputs:false, use_attachments:false, results:[], status:'running'});
+            }
+        }
+    }
+    // 提取 next_dimension
+    const ndMatch = text.match(/"next_dimension"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if(ndMatch) result.next_dimension = ndMatch[1];
+    // 提取 remaining_dimensions
+    const rdMatch = text.match(/"remaining_dimensions"\s*:\s*\[([\s\S]*?)\]/);
+    if(rdMatch){
+        const items = rdMatch[1].match(/"([^"]+)"/g);
+        if(items) result.remaining_dimensions = items.map(s => s.replace(/^"|"$/g, ''));
+    }
+    return result;
+}
 function parseAgentResponse(raw, lastUserText){
     const text = String(raw || '').trim();
     const candidates = [text];
@@ -18150,9 +18241,13 @@ function parseAgentResponse(raw, lastUserText){
     // 先解析所有可成功的 JSON 候选，再按优先级选择最合适的一个
     const parsedCandidates = [];
     for(const candidate of candidates){
+        // 先尝试直接解析，失败后尝试修复再解析
+        let data = null;
+        try { data = JSON.parse(candidate); } catch(e1) {
+            try { data = JSON.parse(repairJsonString(candidate)); } catch(e2) { /* 尝试下一个候选 */ }
+        }
+        if(!data || typeof data !== 'object') continue;
         try {
-            const data = JSON.parse(candidate);
-            if(!data || typeof data !== 'object') continue;
             const reply = typeof data.reply === 'string' ? data.reply : (typeof data.text === 'string' ? data.text : '');
             let options = (Array.isArray(data.options) ? data.options : [])
                 .filter(o => o && typeof o.label === 'string' && typeof o.value === 'string')
@@ -18201,7 +18296,18 @@ function parseAgentResponse(raw, lastUserText){
         return parsedCandidates[0];
     }
     // JSON 解析失败时的 fallback 链
-    console.error('[parseAgentResponse] JSON 解析失败，原始文本:', text.slice(0, 500));
+    console.warn('[parseAgentResponse] JSON.parse 失败，尝试 fallback 提取，原始文本:', text.slice(0, 500));
+    // ★ 先尝试用正则从原始文本中提取 JSON 字段（兜底）
+    const regexResult = extractFieldsWithRegex(text);
+    const hasRegexContent = regexResult.reply || regexResult.options.length > 0 || regexResult.prompts.length > 0 || regexResult.generations.length > 0;
+    if(hasRegexContent){
+        // 自动追加自定义输入选项
+        if(regexResult.options.length > 0 && regexResult.options.length < 8 && !regexResult.options.some(o => o.value === 'CUSTOM_INPUT')){
+            regexResult.options.push({label:'自定义输入', value:'CUSTOM_INPUT'});
+        }
+        console.info('[parseAgentResponse] 正则提取成功:', {options:regexResult.options.length, prompts:regexResult.prompts.length, generations:regexResult.generations.length});
+        return regexResult;
+    }
     const numberedFallback = extractNumberedOptions(text);
     if(numberedFallback){
         const fallbackOptions = numberedFallback.options || [];
@@ -18391,10 +18497,25 @@ if(!Array.isArray(parsed.generations)) parsed.generations = [];
             // 检查 reply 是否包含 JSON 标记（说明解析失败了，但 LLM 确实返回了结构化数据）
             const replyLooksLikeJson = parsed.reply && (parsed.reply.includes('"reply"') || parsed.reply.includes('"options"') || parsed.reply.trim().startsWith('{'));
             if(replyLooksLikeJson){
-                // 解析失败但 LLM 返回了 JSON：不创建 prompt，显示错误让用户重试
-                console.error('[thinkingMode] LLM 返回了 JSON 但解析失败，reply:', parsed.reply?.slice(0, 200));
-                parsed.reply = '⚠️ AI 返回了结构化数据但格式异常，请重试或换个描述。';
-                parsed.options = [];
+                // 解析失败但 LLM 返回了 JSON：尝试从 reply 文本中提取有用信息
+                console.warn('[thinkingMode] LLM 返回了 JSON 但 JSON.parse 和正则提取均失败，尝试最后兜底，reply:', parsed.reply?.slice(0, 200));
+                // 尝试从 raw reply 中提取 reply 字段的值
+                const replyValMatch = parsed.reply.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+                if(replyValMatch){
+                    try { parsed.reply = JSON.parse('"' + replyValMatch[1] + '"'); } catch(e){ parsed.reply = replyValMatch[1]; }
+                    // 提取到了 reply，继续走正常流程创建 prompt
+                    parsed.prompts = [{prompt:text, count:1, use_last_outputs:isModifyRequest, use_attachments:false, status:'pending'}];
+                } else {
+                    // 彻底无法提取：给用户友好的提示 + 默认风格选项
+                    parsed.reply = '抱歉，AI 回复格式异常。请重新描述你的需求，或者选择一个风格方向开始：';
+                    parsed.options = [
+                        {label:'水墨风', value:'水墨风'},
+                        {label:'油画风', value:'油画风'},
+                        {label:'赛博朋克', value:'赛博朋克'},
+                        {label:'Q版卡通', value:'Q版卡通'},
+                        {label:'自定义输入', value:'CUSTOM_INPUT'}
+                    ];
+                }
             } else if(isVagueImageRequest(text) && !isModifyRequest){
                 // 模糊请求：强制走维度选择
                 parsed.options = [

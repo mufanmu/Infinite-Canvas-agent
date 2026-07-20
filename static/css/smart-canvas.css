@@ -1332,6 +1332,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-attach-chip.drop-before { box-shadow:-2px 0 0 0 var(--strong); }
 .agent-attach-chip.drop-after { box-shadow:2px 0 0 0 var(--strong); }
 .agent-ref-confirm { position:absolute; bottom:100%; left:0; right:0; margin-bottom:6px; background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:0 -4px 24px rgba(0,0,0,.12); z-index:50; max-height:280px; display:flex; flex-direction:column; }
+.agent-ref-confirm[hidden] { display:none; }
 .agent-ref-confirm-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px 6px; border-bottom:1px solid var(--line); }
 .agent-ref-confirm-title { font-size:12px; font-weight:600; color:var(--text); }
 .agent-ref-confirm-close { width:22px; height:22px; border-radius:6px; border:none; background:none; color:var(--muted); cursor:pointer; display:flex; align-items:center; justify-content:center; }
