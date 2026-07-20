@@ -634,6 +634,17 @@ LLM_MESSAGE_MAX_LENGTH = int(os.getenv("LLM_MESSAGE_MAX_LENGTH", "20000"))
 CHAT_ATTACHMENT_MAX = int(os.getenv("CHAT_ATTACHMENT_MAX", "20"))
 ONLINE_IMAGE_REFERENCE_MAX = int(os.getenv("ONLINE_IMAGE_REFERENCE_MAX", "20"))
 
+def provider_max_reference_images(provider):
+    """返回当前 provider 的生图参考图上限。
+    agnes-ai (openai-json): 6 张（上游硬限制）
+    其他 provider: ONLINE_IMAGE_REFERENCE_MAX（20 张）"""
+    if not provider:
+        return ONLINE_IMAGE_REFERENCE_MAX
+    image_request_mode = effective_image_request_mode(provider, "")
+    if image_request_mode == "openai-json":
+        return 6
+    return ONLINE_IMAGE_REFERENCE_MAX
+
 FIELD_LABELS = {
     "prompt": "提示词",
     "message": "文本",
@@ -1367,6 +1378,7 @@ def public_provider(provider):
         "has_key": bool(key),
         "key_preview": mask_secret(key),
         "key_env": provider_key_env(provider["id"]),
+        "max_reference_images": provider_max_reference_images(provider),
     }
     if provider.get("id") == "runninghub":
         wallet_key = runninghub_wallet_key_value()
@@ -10644,16 +10656,12 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             responses_url = provider_endpoint_url(provider, "image_generation_endpoint", "/v1/responses")
             response = await post_openai_responses(client, responses_url, api_headers(provider=provider, model=model), body)
         elif image_request_mode == "openai-json":
-            # Agnes 等"OpenAI JSON 图片接口"统一走 /images/generations：
+            # Agnes 等“OpenAI JSON 图片接口”统一走 /images/generations：
             # 不使用 /images/edits，不传顶层 response_format/n/quality；
             # 文生图只传 extra_body.response_format，图生图把参考图放进 extra_body.image。
-            # 参考图压缩到 768px：多张参考图 base64 后 payload 会急剧膨胀（8张1536px≈8.6MB），
-            # 降为 768px 可缩减到 ~2MB，避免上游 "image queue is full" 503 错误。
-            # 上游限制最多 6 张参考图（too many input images: at most 6 allowed）。
-            OPENAI_JSON_REF_MAX = 6
             extra_body = {"response_format": "url"}
             if image_refs:
-                extra_body["image"] = [reference_to_data_url(ref, max_size=768) for ref in image_refs[:OPENAI_JSON_REF_MAX]]
+                extra_body["image"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
             body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_apimart:
@@ -10669,7 +10677,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                 "official_fallback": False,
             }
             if image_refs:
-                body["image_urls"] = [reference_to_data_url(ref, max_size=768) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
             response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
         elif is_gpt2 and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
@@ -10720,7 +10728,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                         detail=f"GPT-Image-2 编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
                     )
                 print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
-                image_payload = [reference_to_data_url(ref, max_size=768) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
                 body = {
                     "model": model, "prompt": prompt, "size": size,
                     "response_format": "url", "n": 1,
@@ -13214,24 +13222,23 @@ async def build_online_image_result(payload: OnlineImageRequest):
     request_size = snap_size_to_multiple(payload.size, 16)
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
+    _max_refs = provider_max_reference_images(provider)
+    if len(image_refs) > _max_refs:
+        print(f"[ref-limit] provider={provider.get('id')} refs={len(image_refs)}>max={_max_refs}, truncating")
+        image_refs = image_refs[:_max_refs]
     count = max(1, min(8, int(payload.n or 1)))
     async def generate_one():
         # 网络错误自动重试（httpx.HTTPError 但非 HTTPStatusError）
         # 解决高并发时间歇性网络中断导致"请求上游生图接口失败"但图实际已生成的问题
-        # 同时对 503（queue is full）和 429（rate limit）等临时性错误也重试
         max_retries = 2
         for attempt in range(max_retries + 1):
             try:
                 image_data, raw_item = await generate_ai_image(payload.prompt, request_size, payload.quality, model, image_refs, provider["id"])
                 break
-            except httpx.HTTPStatusError as exc:
-                # 503（队列满/服务暂不可用）和 429（限流）是临时性错误，重试可解决
-                if exc.response.status_code in (429, 503) and attempt < max_retries:
-                    await asyncio.sleep(2.0 * (attempt + 1))
-                    continue
-                raise
+            except httpx.HTTPStatusError:
+                raise  # HTTP 状态码错误不重试（如 400/401/403）
             except httpx.HTTPError as exc:
-                if attempt < max_retries:
+                if attempt + 1 <= max_retries:
                     await asyncio.sleep(1.5 * (attempt + 1))
                     continue
                 raise

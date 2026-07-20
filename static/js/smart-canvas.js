@@ -18,6 +18,10 @@ const apiKindToggle = document.getElementById('apiKindToggle');
 const inputThumbsRow = document.getElementById('inputThumbsRow');
 const SMART_UPLOAD_MAX = 20;
 const SMART_REFERENCE_IMAGE_MAX = 20;
+function providerMaxReferenceImages(providerId){
+    const p = apiProviderById(providerId);
+    return Number(p?.max_reference_images) > 0 ? Number(p.max_reference_images) : SMART_REFERENCE_IMAGE_MAX;
+}
 const inputPromptPreview = document.getElementById('inputPromptPreview');
 const minimap = document.getElementById('minimap');
 const minimapContent = document.getElementById('minimapContent');
@@ -7304,13 +7308,18 @@ function runSmartNodeToolbarAction(nodeId, action){
         if(!agentOpen) toggleAgentPanel(true);
         if(agentState){
             if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
-            if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX && !agentState.attachments.some(a => a.url === item.url)){
+            const _genProv = agentGenProviders().some(p => p.id === agentState.genProvider) ? agentState.genProvider : (agentGenProviders()[0]?.id || '');
+            const _refMax = _genProv ? providerMaxReferenceImages(_genProv) : AGENT_LLM_IMAGE_MAX;
+            if(agentState.attachments.length < _refMax && !agentState.attachments.some(a => a.url === item.url)){
                 agentState.attachments.push({url:item.url, name:item.name || node.title || 'image', nodeId:node.id, x:Number(node.x) || 0, y:Number(node.y) || 0});
                 renderAgentAttachments();
                 saveAgentState();
                 toast('已发送至 Agent');
+            } else if(agentState.attachments.length >= _refMax){
+                const _pName = apiProviderById(_genProv)?.name || _genProv;
+                toast(`当前生图平台 ${_pName} 最多支持 ${_refMax} 张参考图，已达上限`);
             } else {
-                toast('附件已存在或已达上限');
+                toast('附件已存在');
             }
         }
         return;
@@ -14717,7 +14726,8 @@ function comfyFieldKind(field){
 async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
-    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX)};
+    const _refMax = providerMaxReferenceImages(runSettings.provider_id);
+    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, _refMax)};
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
         if(!r.ok) throw new Error(await r.text());
         return r.json();
@@ -17258,10 +17268,24 @@ async function agentAttachFiles(files){
     skillFiles.forEach(f => setAgentSkillFile(f));
     if(!imageFiles.length) return;
     if(!Array.isArray(agentState.attachments)) agentState.attachments = [];
+    // 检查生图 provider 的参考图上限
+    const _genProvider = agentGenProviders().some(p => p.id === agentState.genProvider) ? agentState.genProvider : (agentGenProviders()[0]?.id || '');
+    const _refMax = _genProvider ? providerMaxReferenceImages(_genProvider) : AGENT_LLM_IMAGE_MAX;
+    const _currentCount = agentState.attachments.length;
+    const _available = Math.max(0, _refMax - _currentCount);
+    if(_available <= 0){
+        const _pName = apiProviderById(_genProvider)?.name || _genProvider;
+        toast(`当前生图平台 ${_pName} 最多支持 ${_refMax} 张参考图，已达上限`);
+        return;
+    }
+    if(imageFiles.length > _available){
+        const _pName = apiProviderById(_genProvider)?.name || _genProvider;
+        toast(`当前生图平台 ${_pName} 最多支持 ${_refMax} 张参考图，仅添加前 ${_available} 张`);
+    }
     try {
         const uploaded = await uploadFiles(imageFiles);
         (uploaded || []).filter(f => f?.url).forEach(f => {
-            if(agentState.attachments.length < AGENT_LLM_IMAGE_MAX) agentState.attachments.push({url:f.url, name:f.name || 'image'});
+            if(agentState.attachments.length < _refMax) agentState.attachments.push({url:f.url, name:f.name || 'image'});
         });
         renderAgentAttachments();
         saveAgentState();
@@ -18539,7 +18563,7 @@ async function runAgentGenerations(assistantMsg, userMsg){
             let refsForBox = [];
             if(gen.use_last_outputs) refsForBox = refsForBox.concat(lastResults);
             if(gen.use_attachments) refsForBox = refsForBox.concat(attachRefs);
-            refsForBox = imageRefsOnly(refsForBox).slice(0, SMART_REFERENCE_IMAGE_MAX);
+            refsForBox = imageRefsOnly(refsForBox).slice(0, providerMaxReferenceImages(providerId));
             const pendingBox = agentPendingBoxSize(gen.count, {refs: refsForBox});
             placeholderNode.w = pendingBox.w;
             placeholderNode.h = pendingBox.h;
@@ -18561,7 +18585,8 @@ async function runAgentGenerations(assistantMsg, userMsg){
             let refs = [];
             if(gen.use_last_outputs) refs = refs.concat(lastResults);
             if(gen.use_attachments) refs = refs.concat(attachRefs);
-            refs = imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX).map(r => ({url:r.url, name:r.name || 'ref'}));
+            const _agentRefMax = providerMaxReferenceImages(providerId);
+            refs = imageRefsOnly(refs).slice(0, _agentRefMax).map(r => ({url:r.url, name:r.name || 'ref'}));
             const payload = {prompt:gen.prompt, provider_id:providerId, model:genModel, size, quality:agentState.genQuality || 'auto', n:1, reference_images:refs};
             const tasks = await Promise.all(Array.from({length:gen.count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
                 if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.agentGenFail')));
