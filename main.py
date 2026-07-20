@@ -4928,7 +4928,13 @@ async def codex_reference_paths(reference_images=None):
                 continue
             path, created = await codex_prepare_local_media(url)
             if path:
-                paths.append(path)
+                # 压缩大图避免 CLI 传输超时
+                compressed = compress_reference_image(path, max_size=1024)
+                if compressed:
+                    paths.append(compressed)
+                    temp_paths.append(compressed)
+                else:
+                    paths.append(path)
             temp_paths.extend(created)
         return paths, temp_paths
     except Exception:
@@ -7572,6 +7578,26 @@ def convert_output_to_jpg(url, quality=88):
     except Exception as e:
         print(f"转换 JPG 失败: {e}")
         return url
+
+def compress_reference_image(path, max_size=1024):
+    """压缩参考图到最长边 max_size 像素，返回临时文件路径。如果原图已足够小则返回 None。"""
+    try:
+        with Image.open(path) as img:
+            img.load()
+            w, h = img.size
+            if max(w, h) <= max_size:
+                return None  # 原图足够小，不需要压缩
+            img.thumbnail((max_size, max_size), Image.LANCZOS)
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+            fmt = "PNG" if img.mode == "RGBA" else "JPEG"
+            fd, tmp_path = tempfile.mkstemp(prefix="ref_comp_", suffix=f".{fmt.lower()}")
+            with os.fdopen(fd, "wb") as f:
+                img.save(f, format=fmt, quality=88 if fmt == "JPEG" else None)
+            return tmp_path
+    except Exception as e:
+        print(f"compress_reference_image failed, using original: {e}")
+        return None
 
 def reference_to_data_url(ref, max_size=None):
     """把本地输出文件转为 data URL（base64）。max_size 限制最长边像素，避免 payload 过大。"""
@@ -10679,6 +10705,7 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             # GPT-Image-2 参考图不能走 /images/generations JSON，否则部分平台会忽略原图或报 Images API unsupported。
             files = []
             opened = []
+            compressed_paths = []
             edit_failed_status = None
             edit_failed_text = ""
             try:
@@ -10686,9 +10713,13 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     path = output_file_from_url(ref.get("url", ""))
                     if not path:
                         continue
-                    fh = open(path, "rb")
+                    # 压缩缩放参考图到最长边1024px，避免大文件导致 413 Request Entity Too Large
+                    compressed_path = compress_reference_image(path, max_size=1024)
+                    if compressed_path:
+                        compressed_paths.append(compressed_path)
+                    fh = open(compressed_path or path, "rb")
                     opened.append(fh)
-                    files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
+                    files.append(("image", (os.path.basename(compressed_path or path), fh, content_type_for_path(compressed_path or path))))
                 if mask_refs:
                     mask_path = output_file_from_url(mask_refs[0].get("url", ""))
                     if mask_path:
@@ -10708,6 +10739,12 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
             finally:
                 for fh in opened:
                     fh.close()
+                # 清理压缩临时文件
+                for cp in compressed_paths:
+                    try:
+                        os.remove(cp)
+                    except Exception:
+                        pass
             # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
             if response is None:
                 if is_gpt2:
