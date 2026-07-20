@@ -58,6 +58,9 @@ echo "本机访问： http://127.0.0.1:3000/"
 echo "============================================"
 echo ""
 
+# 后台延迟3秒自动打开浏览器（等服务器启动完成）
+(sleep 3 && open "http://127.0.0.1:3000/") &
+
 # 优先使用 Homebrew Python，避免部分工具管理的 Python 签名问题
 if [ -x /opt/homebrew/bin/python3 ]; then
     /opt/homebrew/bin/python3 main.py
