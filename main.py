@@ -13212,7 +13212,20 @@ async def build_online_image_result(payload: OnlineImageRequest):
     image_refs = image_references(refs)
     count = max(1, min(8, int(payload.n or 1)))
     async def generate_one():
-        image_data, raw_item = await generate_ai_image(payload.prompt, request_size, payload.quality, model, image_refs, provider["id"])
+        # 网络错误自动重试（httpx.HTTPError 但非 HTTPStatusError）
+        # 解决高并发时间歇性网络中断导致"请求上游生图接口失败"但图实际已生成的问题
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                image_data, raw_item = await generate_ai_image(payload.prompt, request_size, payload.quality, model, image_refs, provider["id"])
+                break
+            except httpx.HTTPStatusError:
+                raise  # HTTP 状态码错误不重试（如 400/401/403）
+            except httpx.HTTPError as exc:
+                if attempt + 1 <= max_retries:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                raise
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
