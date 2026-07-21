@@ -4460,6 +4460,7 @@ async def run_codex_cli(prompt, model="", image_paths=None, timeout=None, output
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=BASE_DIR,
+            env=os.environ,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -5157,9 +5158,18 @@ async def run_gemini_cli(prompt, model="", timeout=None, allow_tools=False):
         args.extend(["--prompt", str(prompt or "")])
     proc = None
     try:
+        # 补全大写代理变量（Go CLI 工具通常只认大写 HTTP_PROXY/HTTPS_PROXY）
+        _env = dict(os.environ)
+        if not _env.get('HTTP_PROXY') and _env.get('http_proxy'):
+            _env['HTTP_PROXY'] = _env['http_proxy']
+        if not _env.get('HTTPS_PROXY') and _env.get('https_proxy'):
+            _env['HTTPS_PROXY'] = _env['https_proxy']
+        if not _env.get('ALL_PROXY') and _env.get('all_proxy'):
+            _env['ALL_PROXY'] = _env['all_proxy']
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=BASE_DIR,
+            env=_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

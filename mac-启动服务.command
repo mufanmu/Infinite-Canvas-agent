@@ -4,6 +4,11 @@
 
 cd "$(dirname "$0")"
 
+# 加载用户 shell 配置（确保代理等环境变量可用）
+[ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc" 2>/dev/null
+[ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile" 2>/dev/null
+[ -f "$HOME/.profile" ] && source "$HOME/.profile" 2>/dev/null
+
 echo "============================================"
 echo "   ComfyUI-API-Modelscope"
 echo "============================================"

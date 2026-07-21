@@ -16839,6 +16839,29 @@ B. 主体更换（use_last_outputs必须为true）：
 1. 绝对不要添加用户没要求的内容，特别是：动画帧、序列帧、多角度视图、动作分解、分镜
 2. 判断依据：如果新主体和原主体是不同的物体/生物/人物 → 主体更换(B)；如果只是改变同一个主体的呈现方式 → 风格修改(A)
 3. 无论A还是B，都使用use_last_outputs: true引用原图，区别在于prompt的写法不同`;
+// OFF模式系统提示词：快速执行器（理解意图但不改写prompt）
+const AGENT_OFF_MODE_INSTRUCTION = `You are a fast image-generation executor. Reply with raw JSON only (no markdown, no extra text):
+{"reply":"简短回复","options":[],"generations":[{"prompt":"用户的原始指令或基于上下文的完整指令","count":1,"use_last_outputs":false,"use_attachments":false}]}
+
+★★★ 核心规则 ★★★
+1. prompt字段：如果用户给了具体的视觉描述，必须原文保留，禁止改写/扩写/翻译/优化。如果用户给的是抽象指令（如"按照分析结果做""按上次风格"），你可以结合上下文生成完整prompt。
+2. 不要提问，不要确认，直接执行。
+3. 理解上下文：记住之前对话中的skill、参考图、分析结果、参数设定。
+4. 图片引用：用户说"图N"时，N对应当前可用图片列表中的编号（系统会在消息中告诉你映射关系）。
+5. 修改/编辑请求（"改成""换成""背景换"等）→ 默认1张，use_last_outputs=true。
+6. 新需求没说数量 → 继承上轮数量；上轮也没有 → 用工具栏设置。
+7. ★★★ 分析/描述/反推/看图/识别类请求 → generations必须为空数组[]，只在reply中给出文字分析结果。判断标准：用户没有要求"生成/画/做/出图"，而是要求"分析/描述/看看/识别/反推/总结/提取"时，绝对不要返回generations。★★★
+8. 所有prompt必须中文，包含主体/风格/构图/光线/色彩/细节/氛围。
+9. 文字规则：默认prompt不含文字内容，除非skill要求或用户明确要求加文字。
+10. 用户上传角色参考图 → 后续保持角色一致性。
+11. 有skill文档时遵循其风格规则，每条prompt完整保留skill描述。
+12. 绝对不要添加用户没要求的内容（动画帧、序列帧、多角度视图等）。
+
+修改场景：
+A. 风格/属性修改（use_last_outputs=true）：只描述要改的+保持其他不变
+B. 主体更换（use_last_outputs=true）："将原图中的[原主体]替换为[新主体]，保持场景/背景/构图/光影不变"
+通用：不同物体→B；同一主体不同呈现→A`;
+
 let agentOpen = false;
 let agentSending = false;
 let agentThinking = false;
@@ -17674,6 +17697,12 @@ function renderAgentMessages(){
                 // 发送文本给 LLM，补全原始请求上下文（带数量信息）
                 const lastUserMsg = [...(agentState.messages || [])].reverse().find(m => m.role === 'user');
                 const originalRequest = lastUserMsg ? String(lastUserMsg.text || '').trim() : '';
+                // 检测"自定义输入"类选项 → 只focus输入框，不发送
+                const isCustomInput = /自定义|其他|custom|other|手动/i.test(value) || /自定义|其他|custom|other|手动/i.test(btn.textContent || '');
+                if(isCustomInput){
+                    if(agentInput){ agentInput.value = ''; agentInput.focus(); }
+                    return;
+                }
                 const sendText = originalRequest && originalRequest !== value ? `${originalRequest}，选择：${value}` : value;
                 if(agentInput){
                     agentInput.value = sendText;
@@ -18671,121 +18700,129 @@ async function sendAgentMessage(){
     const attachments = (Array.isArray(agentState.attachments) ? agentState.attachments : []).slice();
     if(!text && !attachments.length) return;
     
-    // ============ 改造：思维模式 OFF 时跳过 LLM，直接生图 ============
+    // ============ OFF模式：1次LLM调用（快速执行器） ============
     const thinkingModeOn = agentState?.thinkingMode;
     if(!thinkingModeOn){
-        // 思维模式关闭：直接构建 generations 并生图
-        const genProviderId = agentState.genProvider;
-        const genModel = agentState.genModel;
-        
-        // 检查生图模型是否配置
-        const genProviders = agentGenProviders();
-        const genProvider = genProviders.find(p => p.id === genProviderId) || genProviders[0];
-        if(!genProvider){ toast(tr('smart.agentNoProviders') || '未配置生图模型'); return; }
-        
-        const models = providerImageModels(genProvider.id) || [];
-        const model = genModel && models.includes(genModel) ? genModel : (models[0] || '');
-        if(!model){ toast(tr('smart.agentNoProviders') || '生图模型不可用'); return; }
-        
-        // 计算生图参数
-        const ratio = agentState.genRatio || 'square';
-        const resolution = agentState.genResolution || '1k';
-        const count = Math.max(1, Math.min(8, Number(agentState.genCount) || 1));
-        
-        // ★ 图片引用解析：统一编号（生成图在前 + 附件在后），检测"图N"引用
-        const imageMap = agentCurrentImageMap();
-        const totalCount = imageMap.length;
-        const refTasks = totalCount > 0 ? parseImageRefTasks(text, totalCount) : null;
-        let generations = [];
-        let requestedCount = count;
-        const _finalCount = resolveFinalGenCount(text);
-        if(_finalCount.count > 1) requestedCount = _finalCount.count;
-        
-        // 判断是否是修改请求
-        const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
-        const isModifyRequest = userModifyRe.test(text);
-        const useLastOutputs = isModifyRequest && !refTasks;
-        const useAttachments = attachments.length > 0 && !refTasks;
-        
-        if(refTasks && refTasks.tasks.length > 0){
-            // ★ 检测到图片引用：解析编号对应的实际 URL，直接发给生图模型
-            generations = refTasks.tasks.map(task => {
-                const resolvedRefs = task.attachment_indices
-                    .filter(idx => idx >= 0 && idx < imageMap.length)
-                    .map(idx => ({url: imageMap[idx].url, name: imageMap[idx].name || `图${idx + 1}`}));
-                return {
-                    prompt: text,
-                    count: 1,
-                    use_last_outputs: false,
-                    use_attachments: false,
-                    direct_refs: resolvedRefs,
-                    results: [],
-                    status: 'running'
-                };
+        // 检查理解模型是否配置（OFF模式也需要LLM理解意图）
+        if(!chatApiProviders().length){ toast(tr('smart.agentNeedChatModel') || '请先配置理解模型'); return; }
+        const chatProvider = resolveChatProviderId(agentState.chatProvider);
+        const chatModel = resolveChatModel(agentState.chatModel, chatProvider);
+        agentState.chatProvider = chatProvider;
+        agentState.chatModel = chatModel;
+
+        // 构建上下文图片（附件 + 上轮生成图 + 上轮附件）
+        const contextImages = attachments.slice();
+        if(agentState.autoContext !== false){
+            [...agentLastResults(), ...agentLastUserAttachments()].forEach(item => {
+                if(item?.url && contextImages.length < AGENT_LLM_IMAGE_MAX && !contextImages.some(i => i.url === item.url)) contextImages.push(item);
             });
-            requestedCount = generations.length;
-        } else {
-            // 正常模式：根据数量构建 generations
-            for(let i = 0; i < Math.max(requestedCount, 1); i++){
-                const promptText = requestedCount > 1 ? `${text}（变体${i + 1}，不同构图/角度/场景）` : text;
-                generations.push({
-                    prompt: promptText,
-                    count: 1,
-                    use_last_outputs: useLastOutputs,
-                    use_attachments: useAttachments,
-                    results: [],
-                    status: 'running'
-                });
-            }
         }
-        
-        // 创建 user 消息
-        const userMsg = {
-            id: uid('am'),
-            role: 'user',
-            text,
-            images: attachments,
-            ts: Date.now()
+
+        // 构建图片编号映射说明（让LLM知道"图N"对应什么）
+        const imageMap = agentCurrentImageMap();
+        let imageMapDesc = '';
+        if(imageMap.length > 0){
+            imageMapDesc = '\n\n【当前可用图片编号】\n' + imageMap.map(m => `图${m.num} = ${m.source === 'gen' ? '上一轮生成图' : '用户上传附件'}（${m.name || ''}）`).join('\n');
+        }
+
+        // 构建消息文本（注入图片映射 + skill提醒）
+        let messageText = text || '(请分析这些图片)';
+        messageText += imageMapDesc;
+        const _skills = Array.isArray(agentState?.skills) ? agentState.skills : [];
+        if(_skills.length > 0){
+            const skillNames = _skills.map(s => s?.name).filter(Boolean).join('、');
+            messageText += `\n\n【Skill提醒】遵循 Skill 文档（${skillNames}）的所有样式描述。`;
+        }
+
+        // 构建LLM请求
+        const llmPayload = {
+            message: messageText,
+            messages: agentHistoryMessages().slice(0, -1),
+            images: contextImages.slice(0, AGENT_LLM_IMAGE_MAX).map(i => i.url),
+            videos: [],
+            model: chatModel,
+            provider: chatProvider,
+            ms_model: chatProvider === 'modelscope' ? chatModel : '',
+            system_prompt: AGENT_OFF_MODE_INSTRUCTION + (_skills.length > 0 ? '\n\n' + _skills.map(s => `===== Skill: ${s.name} =====\n${s.content || ''}\n===== End =====`).join('\n') : '')
         };
-        if(requestedCount > 1) userMsg.requestedCount = requestedCount;
+
+        // 创建user消息
+        const userMsg = {id:uid('am'), role:'user', text, images:attachments, ts:Date.now()};
         agentState.messages.push(userMsg);
         agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
         agentState.attachments = [];
         if(agentInput) agentInput.value = '';
         renderAgentAttachments();
-        
-        // 创建 assistant 消息（直接生图模式）
-        const assistantMsg = {
-            id: uid('am'),
-            role: 'assistant',
-            text: '',
-            options: [],
-            prompts: [],
-            generations: generations,
-            ts: Date.now(),
-            requestedCount: requestedCount
-        };
-        agentState.messages.push(assistantMsg);
-        agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
         agentSending = true;
-        saveAgentState();
+        agentThinking = true;
         renderAgentMessages();
-        
-        // 直接执行生图
+        saveAgentState();
+
         try {
-            await runAgentGenerations(assistantMsg, userMsg);
+            // 调用LLM（1次，快速理解意图）
+            const taskRes = await fetch('/api/agent-llm-task', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(llmPayload)
+            }).then(async r => {
+                if(!r.ok) throw new Error(await responseErrorMessage(r, 'LLM调用失败'));
+                return r.json();
+            });
+            const taskId = taskRes.task_id;
+            if(!taskId) throw new Error('LLM任务创建失败');
+            // 轮询LLM结果
+            const llmResult = await pollAgentLlmTask(taskId);
+            agentThinking = false;
+
+            // 解析LLM返回
+            const parsed = parseAgentResponse(llmResult.text || '', text);
+            if(!Array.isArray(parsed.generations)) parsed.generations = [];
+            if(!Array.isArray(parsed.options)) parsed.options = [];
+            // ★ 前端防护：分析/描述类请求强制清空generations（防止LLM不遵守规则）
+            const _analysisRe = /^(分析|描述|看看|识别|反推|总结|提取|解读|评价|对比|比较|说说|告诉我|这是什么|里面有什么|什么风格|什么特点)/i;
+            const _noGenRe = /(不要生成|不用画|不需要出图|只分析|只描述|只看|别画|别生成)/i;
+            if((_analysisRe.test(text.trim()) || _noGenRe.test(text)) && !/生成|画一|做一|出一|来一|帮我画|帮我做|帮我生/.test(text)){
+                parsed.generations = [];
+            }
+
+            // 如果LLM返回了generations → 直接执行生图
+            if(parsed.generations.length > 0){
+                const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply || '', options:[], prompts:[], generations:parsed.generations, ts:Date.now()};
+                agentState.messages.push(assistantMsg);
+                agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+                saveAgentState();
+                renderAgentMessages();
+                await runAgentGenerations(assistantMsg, userMsg);
+            } else {
+                // 纯文字回复（分析/描述/问答）
+                const assistantMsg = {id:uid('am'), role:'assistant', text:parsed.reply || llmResult.text || '', options:parsed.options || [], prompts:[], generations:[], ts:Date.now()};
+                agentState.messages.push(assistantMsg);
+                agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+                saveAgentState();
+                renderAgentMessages();
+            }
         } catch(e) {
-            assistantMsg.generations.forEach(g => { g.status = 'failed'; g.error = String(e.message || e); });
-            renderAgentMessages();
+            agentThinking = false;
+            // Fallback：LLM失败时直接透传用户原文+全部参考图
+            console.warn('[OFF mode] LLM failed, fallback to direct:', e.message);
+            const fallbackGens = [{prompt:text, count:1, use_last_outputs:false, use_attachments:attachments.length > 0, results:[], status:'running'}];
+            const assistantMsg = {id:uid('am'), role:'assistant', text:'', options:[], prompts:[], generations:fallbackGens, ts:Date.now()};
+            agentState.messages.push(assistantMsg);
+            agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
             saveAgentState();
+            renderAgentMessages();
+            try { await runAgentGenerations(assistantMsg, userMsg); } catch(e2) {
+                assistantMsg.generations.forEach(g => { g.status = 'failed'; g.error = String(e2.message || e2); });
+                renderAgentMessages(); saveAgentState();
+            }
         } finally {
             agentSending = false;
+            agentThinking = false;
             renderAgentMessages();
             saveAgentState();
         }
         return;
     }
-    // ============ 改造结束 ============
+    // ============ OFF模式结束 ============
     
     // 思维模式开启：走原有 LLM 流程
     if(!chatApiProviders().length){ toast(tr('smart.agentNeedChatModel')); return; }
