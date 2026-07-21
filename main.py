@@ -178,6 +178,14 @@ class ConnectionManager:
                 print(f"Broadcast agent llm done error: {e}")
                 self.active_connections.remove(connection)
 
+    async def broadcast_agent_llm_token(self, task_id: str, token: str):
+        data = json.dumps({"type": "agent_llm_token", "task_id": task_id, "token": token})
+        for connection in self.active_connections[:]:
+            try:
+                await connection.send_text(data)
+            except Exception:
+                self.active_connections.remove(connection)
+
     async def send_personal_message(self, message: dict, client_id: str):
         ws = self.user_connections.get(client_id)
         if ws:
@@ -13552,13 +13560,16 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
         except Exception:
             pass
 
-async def run_agent_llm_task(task_id: str, payload: CanvasLLMRequest):
+async def run_agent_llm_task(task_id: str, payload: CanvasLLMRequest, stream: bool = False):
     with AGENT_LLM_TASK_LOCK:
         if task_id in AGENT_LLM_TASKS:
             AGENT_LLM_TASKS[task_id]["status"] = "running"
             AGENT_LLM_TASKS[task_id]["updated_at"] = time.time()
     try:
-        result = await canvas_llm(payload)
+        if stream:
+            result = await canvas_llm_stream(task_id, payload)
+        else:
+            result = await canvas_llm(payload)
         with AGENT_LLM_TASK_LOCK:
             AGENT_LLM_TASKS[task_id].update({
                 "status": "succeeded",
@@ -13586,7 +13597,7 @@ async def run_agent_llm_task(task_id: str, payload: CanvasLLMRequest):
             pass
 
 @app.post("/api/agent-llm-task")
-async def create_agent_llm_task(payload: CanvasLLMRequest):
+async def create_agent_llm_task(payload: CanvasLLMRequest, stream: bool = False):
     task_id = f"agent_llm_{uuid.uuid4().hex}"
     with AGENT_LLM_TASK_LOCK:
         AGENT_LLM_TASKS[task_id] = {
@@ -13598,7 +13609,7 @@ async def create_agent_llm_task(payload: CanvasLLMRequest):
             "result": None,
             "error": "",
         }
-    asyncio.create_task(run_agent_llm_task(task_id, payload))
+    asyncio.create_task(run_agent_llm_task(task_id, payload, stream=stream))
     return {"task_id": task_id, "status": "queued"}
 
 @app.get("/api/agent-llm-task/{task_id}")
@@ -14741,6 +14752,71 @@ async def canvas_video(payload: CanvasVideoRequest):
         raise HTTPException(status_code=502, detail=f"请求上游视频接口失败：{exc}") from exc
 
 # --- Canvas LLM ---
+
+async def canvas_llm_stream(task_id: str, payload: CanvasLLMRequest):
+    """流式调用 LLM，通过 WebSocket 逐 token 广播，最终返回完整结果。"""
+    _provider = get_api_provider(payload.provider)
+    # CLI 协议不支持流式，回退为普通调用
+    if is_codex_provider(_provider) or is_gemini_cli_provider(_provider):
+        return await canvas_llm(payload)
+    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+    _llm_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
+    _is_apimart = is_apimart_provider(_llm_provider)
+    # APIMart 不支持流式，回退
+    if _is_apimart:
+        return await canvas_llm(payload)
+    system_prompt = (payload.system_prompt or "").strip()
+    upstream_messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
+    for item in payload.messages[-MAX_HISTORY_MESSAGES:]:
+        role = item.get("role")
+        content = item.get("content")
+        if role in {"user", "assistant"} and content:
+            upstream_messages.append({"role": role, "content": content})
+    image_inputs = [img for img in (payload.images or []) if is_image_reference_value(img)]
+    if image_inputs:
+        content_parts = [{"type": "text", "text": payload.message}]
+        for img in image_inputs[:8]:
+            if not img or not isinstance(img, str):
+                continue
+            ref_url = media_reference_to_url(img, max_image_size=1024)
+            if ref_url:
+                content_parts.append({"type": "image_url", "image_url": {"url": ref_url}})
+        upstream_messages.append({"role": "user", "content": content_parts})
+    else:
+        upstream_messages.append({"role": "user", "content": payload.message})
+    # 流式请求
+    full_text = ""
+    try:
+        async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
+            req_body = {"model": model, "messages": upstream_messages, "stream": True}
+            async with client.stream("POST", f"{chat_base}/chat/completions", headers=chat_hdrs, json=req_body) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                        token = delta.get("content") or ""
+                        if token:
+                            full_text += token
+                            try:
+                                await manager.broadcast_agent_llm_token(task_id, token)
+                            except Exception:
+                                pass
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+    except httpx.HTTPStatusError as exc:
+        body = exc.response.text or "" if hasattr(exc.response, 'text') else ""
+        friendly = friendly_chat_error_detail(body, model, _llm_provider)
+        raise HTTPException(status_code=exc.response.status_code, detail=friendly or f"上游接口错误：{body[:300]}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
+    text = full_text.strip() or "接口返回了空回复。"
+    return {"text": text, "model": model, "raw_usage": None, "raw": None}
 
 @app.post("/api/canvas-llm")
 async def canvas_llm(payload: CanvasLLMRequest):
