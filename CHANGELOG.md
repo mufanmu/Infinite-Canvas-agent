@@ -1,5 +1,37 @@
 # 版本更新大纲
 
+#### v2.0 — Agent 架构大改版（LLM-first 意图决策）
+
+**架构重构：**
+- 废弃旧版多层正则防护，改为 LLM 统一意图决策
+- 8 种意图类型：generate / edit / analyze / refine / composite / clarify / meta / cancel
+- 极窄快速路径：纯文生图、简单修改跳过 LLM 零延迟执行
+- 最小安全网：剥离 @mention 后分析动词强制 text_only
+
+**流式输出：**
+- 后端 `canvas_llm_stream`：流式调用 LLM，通过 WebSocket 逐 token 推送
+- 思维模式接入流式（`?stream=true`）
+- 流式气泡：max-height 200px + 滚动 + 停止按钮
+
+**意图分发：**
+- analyze：分析图片 + 行动引导选项（点击即可继续操作）
+- refine：反推/扩写提示词，只输出 prompt 不引导
+- clarify：意图不明时主动提问 + 可点击选项
+- cancel：取消操作
+- meta：回答 Agent 自身信息
+
+**新 UI 组件：**
+- 生成后快捷操作栏（修改 / 变体 / 反推）
+- 分析结果卡片（结构化标签 + “用这个Prompt生图”按钮）
+- 提示词建议卡片（等宽字体 + “直接生图”按钮）
+- 降级提示条（模型能力不足时显示）
+- 流式气泡（逐字显示 + 停止按钮）
+
+**其他：**
+- 模型无关设计：不硬编码任何模型名称
+- LLM 失败回退策略：明确生图意图→直接生图，明确分析意图→提示重试
+- mac 启动脚本添加 no_proxy 避免 Clash 劫持本地请求
+
 #### v1.0 — AI Agent 面板基线
 - AI Agent 侧边聊天面板（OneBox 风格），画布联动生图
 - `@` 引用画布图片，附件统一管理（Skill 文档 + 图片）
