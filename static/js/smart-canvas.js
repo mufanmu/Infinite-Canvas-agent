@@ -18931,11 +18931,13 @@ async function sendAgentMessage(){
         saveAgentState();
 
         // ===== 快速路径：跳过LLM直接生图 =====
+        const _hasGenVerb = /画|生成|设计|创作|做一张|出一张|来一张|帮我画|帮我做|帮我生/.test(text);
         const isFastPath = text && !attachments.length && !hasLastOutputs
             && _skills.length === 0
             && !analyzeRe.test(text.trim()) && !refineRe.test(text) && !noGenRe.test(text)
             && !modifyRe.test(text)
-            && !/图\d|参考图/.test(text);
+            && !/图\d|参考图/.test(text)
+            && (_hasGenVerb || text.trim().length > 10);
         if(isFastPath){
             // 直接用原文生图，零延迟
             const gens = [{prompt:text, count:1, use_last_outputs:false, use_attachments:false, results:[], status:'running'}];
