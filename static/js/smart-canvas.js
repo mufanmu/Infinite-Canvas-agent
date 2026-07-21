@@ -17,7 +17,7 @@ const fileInput = document.getElementById('fileInput');
 const apiKindToggle = document.getElementById('apiKindToggle');
 const inputThumbsRow = document.getElementById('inputThumbsRow');
 const SMART_UPLOAD_MAX = 20;
-const SMART_REFERENCE_IMAGE_MAX = 20;
+const SMART_REFERENCE_IMAGE_MAX = 10;
 function providerMaxReferenceImages(providerId){
     const p = apiProviderById(providerId);
     return Number(p?.max_reference_images) > 0 ? Number(p.max_reference_images) : SMART_REFERENCE_IMAGE_MAX;
@@ -17142,71 +17142,93 @@ function isVagueImageRequest(text){
 }
 // ★ 纯文字引导解析器：从用户输入中识别图N引用，判断拆分/组合模式
 // 返回 { mode, tasks } 或 null（无图引用时）
-// mode: 'split'（每张独立出图） | 'combine'（多图合成一张） | 'single'（单任务）
+// mode: 'split'（每张独立出图） | 'single'（单任务，全发）
 // tasks: [{ prompt, attachment_indices(0-based) }]
+// 核心原则：默认不拆分（全发给模型理解），只有明确的批量独立操作才拆分
 function parseImageRefTasks(text, attachCount){
     if(!text || !attachCount || attachCount === 0) return null;
+    // 0. 中文数字转阿拉伯（图一→图1，图十→图10）
+    const cnNumMap = {'一':'1','二':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9','十':'10'};
+    let t = text.replace(/图\s*([一二三四五六七八九十])/g, (match, cn) => `图${cnNumMap[cn] || cn}`);
+
     const uniqueRefs = new Set();
-    const consumedRanges = []; // {start, end} 文本索引范围，避免重复匹配
+    const refOccurrences = {}; // 每张图被引用的次数
+    const consumedRanges = [];
+    function addRef(num){ if(num >= 1 && num <= attachCount){ uniqueRefs.add(num); refOccurrences[num] = (refOccurrences[num] || 0) + 1; } }
+
     // 1. 范围：图1到图7, 图1至7, 图1-4, 图1~4
     const rangeRe = /图\s*(\d+)\s*[到至\-~]\s*图?\s*(\d+)/g;
     let m;
-    while((m = rangeRe.exec(text)) !== null){
+    while((m = rangeRe.exec(t)) !== null){
         const lo = Math.min(parseInt(m[1]), parseInt(m[2]));
         const hi = Math.max(parseInt(m[1]), parseInt(m[2]));
-        for(let i = lo; i <= hi; i++){ if(i >= 1 && i <= attachCount) uniqueRefs.add(i); }
+        for(let i = lo; i <= hi; i++) addRef(i);
         consumedRanges.push({start:m.index, end:m.index + m[0].length});
     }
     // 2. 列表和单个：图1、2、3 或 图1
     const listRe = /图\s*(\d+)((?:\s*[、,，和与]\s*\d+)*)/g;
-    while((m = listRe.exec(text)) !== null){
+    while((m = listRe.exec(t)) !== null){
         const ms = m.index, me = m.index + m[0].length;
         if(consumedRanges.some(r => ms >= r.start && me <= r.end)) continue;
-        const first = parseInt(m[1]);
-        if(first >= 1 && first <= attachCount) uniqueRefs.add(first);
-        if(m[2]){
-            const restNums = m[2].match(/\d+/g);
-            if(restNums) restNums.forEach(n => { const num = parseInt(n); if(num >= 1 && num <= attachCount) uniqueRefs.add(num); });
-        }
+        addRef(parseInt(m[1]));
+        if(m[2]){ const restNums = m[2].match(/\d+/g); if(restNums) restNums.forEach(n => addRef(parseInt(n))); }
     }
-    // "前面N张" / "前N张"
-    const frontRe = /前(?:面)?\s*(\d+)\s*张/;
-    const frontMatch = text.match(frontRe);
-    if(frontMatch){
-        const n = parseInt(frontMatch[1]);
-        for(let i = 1; i <= Math.min(n, attachCount); i++) uniqueRefs.add(i);
-    }
+    // 3. "前面N张" / "前N张"
+    const frontMatch = t.match(/前(?:面)?\s*(\d+)\s*张/);
+    if(frontMatch){ const n = parseInt(frontMatch[1]); for(let i = 1; i <= Math.min(n, attachCount); i++) addRef(i); }
+
     if(uniqueRefs.size === 0) return null;
     const allRefs = Array.from(uniqueRefs).sort((a, b) => a - b);
-    // 3. 识别公共参考图：按照图N, 用图N, 图N的方式/风格/版式
-    const commonRefs = new Set();
-    const commonRe1 = /(?:按照|用|参考|参照)\s*图\s*(\d+)/g;
-    while((m = commonRe1.exec(text)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) commonRefs.add(num); }
-    const commonRe2 = /图\s*(\d+)\s*的\s*(?:方式|风格|版式|构图|布局|模板)/g;
-    while((m = commonRe2.exec(text)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) commonRefs.add(num); }
-    // 4. 独立图 = 全部 - 公共
-    const independentRefs = allRefs.filter(r => !commonRefs.has(r));
-    // 5. 模式判断
-    const hasReplace = /替换/.test(text);
-    if(hasReplace){
-        // 组合模式：所有图合成一张
-        return { mode:'combine', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+
+    // 4. 底图检测：仅靠位置/结构模式判断（不靠引用次数，避免公共参考图被误判）
+    const baseImages = new Set();
+    // "图N中/里/的XX位置" 或 "保持图N的XX不变" → 底图
+    const baseRe1 = /图\s*(\d+)\s*(?:中|里)\s*(?:的)?(?:左|右|上|下|中间|旁边)/g;
+    while((m = baseRe1.exec(t)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) baseImages.add(num); }
+    const baseRe2 = /保持\s*图\s*(\d+)\s*的/g;
+    while((m = baseRe2.exec(t)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) baseImages.add(num); }
+    const baseRe3 = /图\s*(\d+)\s*的(?:背景|构图|版式|布局|场景|底色)/g;
+    while((m = baseRe3.exec(t)) !== null){ const num = parseInt(m[1]); if(num >= 1 && num <= attachCount) baseImages.add(num); }
+
+    // 5. 模式判断（默认不拆分，交给模型理解）
+    const hasCombineHint = /合成一张|合并|拼在一起|组合成|拼接|融合/.test(t);
+    const hasSplitKeyword = /各出一张|各出|分别|各一张|每张|逐一|逐个|全部重新/.test(t);
+
+    // 规则 1：有底图 → 不拆分（单任务编辑）
+    if(baseImages.size > 0){
+        return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
     }
-    if(commonRefs.size > 0 && independentRefs.length > 0){
-        // 拆分模式：每张独立图 + 公共图
-        const commonArr = Array.from(commonRefs).sort((a, b) => a - b).map(r => r - 1);
+    // 规则 2：合成关键词 → 不拆分
+    if(hasCombineHint){
+        return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+    }
+    // 规则 3：只有 1 张引用 → 不拆分
+    if(allRefs.length <= 1){
+        return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
+    }
+    // 规则 4：多张独立引用 + (有拆分关键词 或 范围引用) → 拆分
+    // 识别公共参考图：不在范围引用内的单独编号 = 公共图
+    const rangeRefs = new Set();
+    const rangeRe2 = /图\s*(\d+)\s*[到至\-~]\s*图?\s*(\d+)/g;
+    while((m = rangeRe2.exec(t)) !== null){
+        const lo = Math.min(parseInt(m[1]), parseInt(m[2]));
+        const hi = Math.max(parseInt(m[1]), parseInt(m[2]));
+        for(let i = lo; i <= hi; i++){ if(i >= 1 && i <= attachCount) rangeRefs.add(i); }
+    }
+    // 独立图 = 范围引用内的图；公共图 = 不在范围内的单独引用
+    const independentRefs = allRefs.filter(r => rangeRefs.has(r));
+    const commonRefs = allRefs.filter(r => !rangeRefs.has(r));
+
+    const shouldSplit = (hasSplitKeyword || rangeRefs.size > 1) && independentRefs.length > 1;
+    if(shouldSplit){
+        const commonArr = commonRefs.map(r => r - 1);
         const tasks = independentRefs.map(ref => ({ prompt:text, attachment_indices:[ref - 1, ...commonArr] }));
         return { mode:'split', tasks };
     }
-    const hasSplitKeyword = /各出一张|各出|分别|各一张|每张/.test(text);
-    if(hasSplitKeyword && independentRefs.length > 0){
-        // 拆分模式（无公共图）
-        const tasks = independentRefs.map(ref => ({ prompt:text, attachment_indices:[ref - 1] }));
-        return { mode:'split', tasks };
-    }
-    // 默认：单任务带所有引用图
+    // 默认：不拆分，全发（让模型理解意图）
     return { mode:'single', tasks:[{ prompt:text, attachment_indices:allRefs.map(r => r - 1) }] };
 }
+
 // ★ 确认面板：显示解析后的参考图任务列表，等待用户确认/取消
 let _agentRefConfirmResolver = null;
 function showImageRefConfirmPanel(refTasks){
@@ -17367,7 +17389,7 @@ function renderAgentAttachments(){
         html += `<div class="agent-attach-skill"><i data-lucide="file-text"></i><span class="agent-attach-skill-name">${escapeHtml(skill.name || 'skill.md')}</span><button type="button" data-agent-skill-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     attachments.forEach((att, i) => {
-        html += `<div class="agent-attach-chip" draggable="${attachments.length > 1 ? 'true' : 'false'}" data-agent-att-index="${i}" title="${escapeHtml(att.name || 'image')}"><span class="agent-att-num">${i + 1}</span><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
+        html += `<div class="agent-attach-chip" draggable="${attachments.length > 1 ? 'true' : 'false'}" data-agent-att-index="${i}" title="${escapeHtml(att.name || 'image')}"><span class="agent-att-num">${agentLastResults().length + i + 1}</span><img src="${escapeHtml(att.url)}" alt=""><button type="button" data-agent-att-remove="${i}"><i data-lucide="x"></i></button></div>`;
     });
     agentAttachRow.innerHTML = html;
     if(window.lucide) lucide.createIcons();
@@ -17494,7 +17516,7 @@ async function agentAttachFiles(files){
         toast(String(e.message || e).slice(0, 120));
     }
 }
-function agentGenCardHtml(gen){
+function agentGenCardHtml(gen, numOffset){
     const status = gen.status || 'running';
     const statusText = status === 'done' ? tr('smart.agentGenDone') : status === 'error' ? tr('smart.agentGenFail') : tr('smart.agentGenerating');
     const refTags = [gen.use_last_outputs ? tr('smart.agentRefLast') : '', gen.use_attachments ? tr('smart.agentRefAttach') : ''].filter(Boolean).join(' · ');
@@ -17502,14 +17524,15 @@ function agentGenCardHtml(gen){
     const attachIdxTag = (Array.isArray(gen.attachment_indices) && gen.attachment_indices.length > 0)
         ? `参考图#${gen.attachment_indices.map(i => i + 1).join(',')}` : '';
     const fullRefTags = [refTags, attachIdxTag].filter(Boolean).join(' · ');
-    const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<img src="${escapeHtml(r.url)}" alt="" loading="lazy" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer">`).join('');
+    const thumbs = (gen.results || []).filter(r => r?.url).map((r, i) => `<span class="agent-gen-thumb-wrap"><span class="agent-gen-img-num">${(numOffset || 0) + i + 1}</span><img src="${escapeHtml(r.url)}" alt="" loading="lazy" title="图${(numOffset || 0) + i + 1} - 点击跳转" data-agent-gen-jump="${escapeHtml(r.nodeId || '')}" data-agent-gen-x="${r.nodeX || 0}" data-agent-gen-y="${r.nodeY || 0}" style="cursor:pointer"></span>`).join('');
     const promptText = escapeHtml(gen.prompt || '');
     const promptHtml = promptText ? `<div class="agent-gen-prompt agent-gen-prompt-collapsed" data-agent-gen-prompt="1">${promptText}<button class="agent-gen-prompt-toggle" type="button" data-agent-prompt-toggle="1">${escapeHtml(tr('smart.agentExpand') || '展开')}</button></div>` : '';
     return `<div class="agent-gen-card">${promptHtml}<div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${fullRefTags ? ' · ' + escapeHtml(fullRefTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}</div>`;
 }
 function agentMessageHtml(msg){
     const imgs = (msg.images || []).filter(i => i?.url).map(i => `<img src="${escapeHtml(i.url)}" alt="" loading="lazy">`).join('');
-    const gens = (msg.generations || []).map(agentGenCardHtml).join('');
+    let _genNumOffset = 0;
+    const gens = (msg.generations || []).map(g => { const html = agentGenCardHtml(g, _genNumOffset); _genNumOffset += (g.results || []).filter(r => r?.url).length; return html; }).join('');
     const actions = msg.text ? `<div class="agent-msg-actions"><button class="agent-msg-action-btn" type="button" data-agent-copy="${escapeHtml(msg.id)}" title="复制"><i data-lucide="copy"></i></button>${msg.role === 'assistant' ? `<button class="agent-msg-action-btn" type="button" data-agent-retry="${escapeHtml(msg.id)}" title="重试"><i data-lucide="refresh-cw"></i></button>` : ''}</div>` : '';
     // 结构化 options 字段（仅 assistant 消息，且 generations 为空时显示）
     const hasGenerations = Array.isArray(msg.generations) && msg.generations.length > 0;
@@ -17766,6 +17789,16 @@ function agentLastUserAttachments(){
         if(msgs[i].role === 'user' && (msgs[i].images || []).some(img => img?.url)) return msgs[i].images.filter(img => img?.url);
     }
     return [];
+}
+function agentCurrentImageMap(){
+    // 统一编号映射：上一轮生成图(图1~图M) + 当前附件(图M+1~图M+N)
+    const genResults = agentLastResults();
+    const attachments = (agentState?.attachments || []).filter(a => a?.url);
+    const map = [];
+    genResults.forEach((r, i) => map.push({num: i + 1, url: r.url, name: r.name || `图${i + 1}`, source: 'gen'}));
+    const offset = genResults.length;
+    attachments.forEach((a, i) => map.push({num: offset + i + 1, url: a.url, name: a.name || `图${offset + i + 1}`, source: 'att'}));
+    return map;
 }
 function agentNewChat(){
     if(!agentState) return;
@@ -18659,8 +18692,10 @@ async function sendAgentMessage(){
         const resolution = agentState.genResolution || '1k';
         const count = Math.max(1, Math.min(8, Number(agentState.genCount) || 1));
         
-        // ★ 图片引用解析：检测用户输入中的"图N"引用，构建精确的 attachment_indices
-        const refTasks = parseImageRefTasks(text, attachments.length);
+        // ★ 图片引用解析：统一编号（生成图在前 + 附件在后），检测"图N"引用
+        const imageMap = agentCurrentImageMap();
+        const totalCount = imageMap.length;
+        const refTasks = totalCount > 0 ? parseImageRefTasks(text, totalCount) : null;
         let generations = [];
         let requestedCount = count;
         const _finalCount = resolveFinalGenCount(text);
@@ -18669,27 +18704,25 @@ async function sendAgentMessage(){
         // 判断是否是修改请求
         const userModifyRe = /改成|换成|转换成|修改为|变成|转为|改为|转成|调整为|修改成|变回|调成|重新画|重画|重新生成|修改一下|改一下|调整一下/i;
         const isModifyRequest = userModifyRe.test(text);
-        const useLastOutputs = isModifyRequest;
-        const useAttachments = attachments.length > 0;
+        const useLastOutputs = isModifyRequest && !refTasks;
+        const useAttachments = attachments.length > 0 && !refTasks;
         
         if(refTasks && refTasks.tasks.length > 0){
-            // ★ 检测到图片引用：弹确认面板
-            const confirmed = await showImageRefConfirmPanel(refTasks);
-            if(!confirmed){
-                hideImageRefConfirmPanel(false);
-                return; // 用户取消
-            }
-            hideImageRefConfirmPanel(true);
-            // 从确认的任务构建 generations
-            generations = refTasks.tasks.map(task => ({
-                prompt: task.prompt,
-                count: 1,
-                use_last_outputs: useLastOutputs,
-                use_attachments: true,
-                attachment_indices: task.attachment_indices,
-                results: [],
-                status: 'running'
-            }));
+            // ★ 检测到图片引用：解析编号对应的实际 URL，直接发给生图模型
+            generations = refTasks.tasks.map(task => {
+                const resolvedRefs = task.attachment_indices
+                    .filter(idx => idx >= 0 && idx < imageMap.length)
+                    .map(idx => ({url: imageMap[idx].url, name: imageMap[idx].name || `图${idx + 1}`}));
+                return {
+                    prompt: text,
+                    count: 1,
+                    use_last_outputs: false,
+                    use_attachments: false,
+                    direct_refs: resolvedRefs,
+                    results: [],
+                    status: 'running'
+                };
+            });
             requestedCount = generations.length;
         } else {
             // 正常模式：根据数量构建 generations
@@ -19187,8 +19220,12 @@ async function runAgentGenerations(assistantMsg, userMsg){
             placeholderNode.runStartedAt = nowMs();
             placeholderNode.runTimerHidden = false;
             let refsForBox = [];
-            if(gen.use_last_outputs) refsForBox = refsForBox.concat(lastResults);
-            if(gen.use_attachments) refsForBox = refsForBox.concat(attachRefs);
+            if(Array.isArray(gen.direct_refs) && gen.direct_refs.length > 0){
+                refsForBox = gen.direct_refs.filter(r => r?.url);
+            } else {
+                if(gen.use_last_outputs) refsForBox = refsForBox.concat(lastResults);
+                if(gen.use_attachments) refsForBox = refsForBox.concat(attachRefs);
+            }
             refsForBox = imageRefsOnly(refsForBox).slice(0, providerMaxReferenceImages(providerId));
             const pendingBox = agentPendingBoxSize(gen.count, {refs: refsForBox});
             placeholderNode.w = pendingBox.w;
@@ -19211,22 +19248,51 @@ async function runAgentGenerations(assistantMsg, userMsg){
         const placeholderId = placeholderNode?.id || null;
         try {
             let refs = [];
-            if(gen.use_last_outputs) refs = refs.concat(lastResults);
-            if(gen.use_attachments){
-                // 如果指定了 attachment_indices，只取对应的附件（0-based 索引）
-                if(Array.isArray(gen.attachment_indices) && gen.attachment_indices.length > 0){
-                    const filtered = gen.attachment_indices
-                        .filter(i => i >= 0 && i < attachRefs.length)
-                        .map(i => attachRefs[i])
-                        .filter(Boolean);
-                    refs = refs.concat(filtered);
-                } else {
-                    refs = refs.concat(attachRefs);
+            if(Array.isArray(gen.direct_refs) && gen.direct_refs.length > 0){
+                // ★ 统一编号引用：直接使用预解析的参考图 URL
+                refs = gen.direct_refs.filter(r => r?.url);
+            } else {
+                if(gen.use_last_outputs) refs = refs.concat(lastResults);
+                if(gen.use_attachments){
+                    // 如果指定了 attachment_indices，只取对应的附件（0-based 索引）
+                    if(Array.isArray(gen.attachment_indices) && gen.attachment_indices.length > 0){
+                        const filtered = gen.attachment_indices
+                            .filter(i => i >= 0 && i < attachRefs.length)
+                            .map(i => attachRefs[i])
+                            .filter(Boolean);
+                        refs = refs.concat(filtered);
+                    } else {
+                        refs = refs.concat(attachRefs);
+                    }
                 }
             }
             const _agentRefMax = providerMaxReferenceImages(providerId);
-            refs = imageRefsOnly(refs).slice(0, _agentRefMax).map(r => ({url:r.url, name:r.name || 'ref'}));
-            const payload = {prompt:gen.prompt, provider_id:providerId, model:genModel, size, quality:agentState.genQuality || 'auto', n:1, reference_images:refs};
+            const _allImageRefs = imageRefsOnly(refs);
+            if(_allImageRefs.length > _agentRefMax){ toast(`参考图超出上限（最多${_agentRefMax}张），已截取前${_agentRefMax}张`); }
+            refs = _allImageRefs.slice(0, _agentRefMax).map(r => ({url:r.url, name:r.name || 'ref'}));
+            // ★ 编号翻译层：将 prompt 中的"图N/图一"替换为"第X张参考图"，注入角色说明
+            let _finalPrompt = gen.prompt;
+            if(Array.isArray(gen.direct_refs) && gen.direct_refs.length > 0){
+                // 先做中文数字→阿拉伯转换（与 parseImageRefTasks 一致）
+                const _cnMap = {'一':'1','二':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9','十':'10'};
+                _finalPrompt = _finalPrompt.replace(/图\s*([一二三四五六七八九十])/g, (m, cn) => `图${_cnMap[cn] || cn}`);
+                const _imgMap = agentCurrentImageMap();
+                const _roleDescs = [];
+                gen.direct_refs.forEach((ref, idx) => {
+                    const _entry = _imgMap.find(m => m.url === ref.url);
+                    const _origNum = _entry ? _entry.num : null;
+                    if(_origNum){
+                        const _re = new RegExp('图\\s*' + _origNum + '(?![0-9])', 'g');
+                        _finalPrompt = _finalPrompt.replace(_re, `第${idx + 1}张参考图`);
+                    }
+                    _roleDescs.push(`第${idx + 1}张`);
+                });
+                // 注入角色说明头（让模型知道参考图数组的顺序含义）
+                if(_roleDescs.length > 1){
+                    _finalPrompt = `[参考图顺序：${_roleDescs.join('、')}，与下方参考图数组一一对应]\n${_finalPrompt}`;
+                }
+            }
+            const payload = {prompt:_finalPrompt, provider_id:providerId, model:genModel, size, quality:agentState.genQuality || 'auto', n:1, reference_images:refs};
             const tasks = await Promise.all(Array.from({length:gen.count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
                 if(!r.ok) throw new Error(await responseErrorMessage(r, tr('smart.agentGenFail')));
                 return r.json();
@@ -19638,11 +19704,6 @@ function syncAgentThinkingBtn(){
     if(agentThinkingBtn){
         agentThinkingBtn.classList.toggle('active', !!agentState?.thinkingMode);
     }
-    // 思维模式关闭时收起理解模型下拉面板
-    if(!agentState?.thinkingMode){
-        const chatModelPanel = document.getElementById('agentChatModelPanel');
-        if(chatModelPanel) chatModelPanel.hidden = true;
-    }
 }
 syncAgentThinkingBtn();
 agentThinkingBtn?.addEventListener('click', () => {
@@ -19650,15 +19711,7 @@ agentThinkingBtn?.addEventListener('click', () => {
     agentState.thinkingMode = !agentState.thinkingMode;
     syncAgentThinkingBtn();
     saveAgentState();
-    toast(agentState.thinkingMode ? '思维模式已开启：扩写/优化提示词' : '思维模式已关闭：直接生成');
-    // 开启思维模式时，展开理解模型选择面板（右对齐，避免覆盖发送按钮）
-    if(agentState.thinkingMode){
-        const chatModelPanel = document.getElementById('agentChatModelPanel');
-        const thinkingBtn = document.getElementById('agentThinkingBtn');
-        if(chatModelPanel && thinkingBtn && window.__agentShowDropdown){
-            window.__agentShowDropdown(thinkingBtn, chatModelPanel, {alignRight:true});
-        }
-    }
+    toast(agentState.thinkingMode ? '思维模式 ON：深度创作（多轮扩写）' : '思维模式 OFF：快速执行（直传生图）');
 });
     agentInput?.addEventListener('input', () => {
         const val = agentInput.value;

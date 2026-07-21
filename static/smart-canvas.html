@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=v1.6.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=v1.6.1784282603"></script>
     <script src="/static/js/i18n.js?v=v1.6.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=v1.6.1784560300">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=v1.6.1784599851">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -246,6 +246,7 @@
                         <div class="agent-toolbar-dropdown-wrap">
                             <button id="agentModelBtn" class="agent-toolbar-btn" type="button"><span id="agentModelLabel">模型</span><i data-lucide="chevron-down"></i></button>
                             <div id="agentModelPanel" class="agent-dropdown-panel" hidden>
+                                <div class="agent-dropdown-row"><label>理解</label><div class="agent-dropdown-selects" id="agentChatModelSelects"></div></div>
                                 <div class="agent-dropdown-row"><label>生图</label><div class="agent-dropdown-selects" id="agentGenSelects"></div></div>
                             </div>
                         </div>
@@ -299,19 +300,14 @@
                             </div>
                         </div>
                         <div class="agent-toolbar-spacer"></div>
-                        <div class="agent-toolbar-dropdown-wrap">
-                            <button id="agentThinkingBtn" class="agent-thinking-btn" type="button">
-                                <i data-lucide="brain" class="agent-thinking-icon"></i>
-                                <span class="agent-thinking-label">思维</span>
-                                <div class="agent-thinking-tooltip">
-                                    <div class="agent-tooltip-title">思维模式</div>
-                                    <div class="agent-tooltip-sub">扩写/优化提示词</div>
-                                </div>
-                            </button>
-                            <div id="agentChatModelPanel" class="agent-dropdown-panel" hidden>
-                                <div class="agent-dropdown-row"><label>理解模型</label><div class="agent-dropdown-selects" id="agentChatModelSelects"></div></div>
+                        <button id="agentThinkingBtn" class="agent-thinking-btn" type="button">
+                            <i data-lucide="brain" class="agent-thinking-icon"></i>
+                            <span class="agent-thinking-label">思维</span>
+                            <div class="agent-thinking-tooltip">
+                                <div class="agent-tooltip-title">思维模式</div>
+                                <div class="agent-tooltip-sub">ON=深度创作 OFF=快速执行</div>
                             </div>
-                        </div>
+                        </button>
                         <button id="agentSendBtn" class="agent-send-btn" type="button" data-i18n-title="smart.agentSend" title="发送"><i data-lucide="send"></i></button>
                     </div>
                 </div>
@@ -575,6 +571,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=v1.6.1784560200"></script>
+    <script src="/static/js/smart-canvas.js?v=v1.6.1784606024"></script>
 </body>
 </html>
