@@ -1220,8 +1220,10 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-thinking-btn.active:hover { opacity:.88; }
 .agent-thinking-tooltip {
     position:absolute; bottom:calc(100% + 8px); right:0;
+    width:200px;
     background:#1e293b; color:#f1f5f9;
-    padding:8px 12px; border-radius:8px; white-space:nowrap;
+    padding:8px 12px; border-radius:8px;
+    text-align:left; white-space:normal; line-height:1.5;
     pointer-events:none; opacity:0; visibility:hidden;
     transform:translateY(4px);
     transition:opacity .14s ease, transform .14s ease, visibility .14s ease;
@@ -1327,6 +1329,13 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .agent-quick-btn.primary { background:var(--strong); color:var(--strong-text); border-color:var(--strong); }
 .agent-quick-btn.primary:hover { opacity:.85; }
 .agent-quick-btn i,.agent-quick-btn svg { width:11px; height:11px; }
+
+/* 变体数量选择气泡 */
+.agent-variant-wrap { position:relative; display:inline-flex; }
+.agent-variant-pop { position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); display:none; gap:2px; padding:4px 6px; border-radius:8px; border:1px solid var(--line); background:var(--card); box-shadow:0 4px 12px rgba(0,0,0,.12); z-index:20; white-space:nowrap; }
+.agent-variant-pop.open { display:flex; }
+.agent-variant-opt { display:inline-flex; align-items:center; justify-content:center; min-width:28px; height:24px; padding:0 6px; border-radius:6px; border:1px solid var(--line); background:var(--soft); color:var(--text); font-size:11px; font-weight:700; cursor:pointer; transition:all .12s ease; }
+.agent-variant-opt:hover { background:var(--strong); color:var(--strong-text); border-color:var(--strong); }
 
 /* 分析结果卡片 */
 .agent-analysis-card { width:100%; max-width:320px; border-radius:12px; border:1px solid var(--line); background:var(--card); overflow:hidden; }

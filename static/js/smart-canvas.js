@@ -17653,7 +17653,7 @@ function agentGenCardHtml(gen, numOffset){
     const promptText = escapeHtml(gen.prompt || '');
     const promptHtml = promptText ? `<div class="agent-gen-prompt agent-gen-prompt-collapsed" data-agent-gen-prompt="1">${promptText}<button class="agent-gen-prompt-toggle" type="button" data-agent-prompt-toggle="1">${escapeHtml(tr('smart.agentExpand') || '展开')}</button></div>` : '';
     // 生成完成后显示快捷操作栏
-    const quickActions = status === 'done' && thumbs ? `<div class="agent-gen-quick-actions"><button class="agent-quick-btn" type="button" data-agent-quick="edit" title="修改"><i data-lucide="pencil"></i><span>修改</span></button><button class="agent-quick-btn" type="button" data-agent-quick="variant" title="变体"><i data-lucide="copy-plus"></i><span>变体</span></button><button class="agent-quick-btn" type="button" data-agent-quick="describe" title="反推"><i data-lucide="scan-search"></i><span>反推</span></button></div>` : '';
+    const quickActions = status === 'done' && thumbs ? `<div class="agent-gen-quick-actions"><button class="agent-quick-btn" type="button" data-agent-quick="edit" title="修改"><i data-lucide="pencil"></i><span>修改</span></button><span class="agent-variant-wrap"><button class="agent-quick-btn" type="button" data-agent-quick="variant" title="变体"><i data-lucide="copy-plus"></i><span>变体</span></button><div class="agent-variant-pop"><button class="agent-variant-opt" type="button" data-agent-variant-count="1">×1</button><button class="agent-variant-opt" type="button" data-agent-variant-count="2">×2</button><button class="agent-variant-opt" type="button" data-agent-variant-count="3">×3</button><button class="agent-variant-opt" type="button" data-agent-variant-count="4">×4</button></div></span><button class="agent-quick-btn" type="button" data-agent-quick="describe" title="反推"><i data-lucide="scan-search"></i><span>反推</span></button></div>` : '';
     return `<div class="agent-gen-card">${promptHtml}<div class="agent-gen-status ${status === 'error' ? 'error' : status === 'done' ? 'done' : ''}">${status === 'running' ? '<span class="agent-gen-spinner"></span>' : ''}<span>${escapeHtml(statusText)}${fullRefTags ? ' · ' + escapeHtml(fullRefTags) : ''}</span></div>${status === 'error' && gen.error ? `<div class="agent-gen-prompt">${escapeHtml(String(gen.error).slice(0, 160))}</div>` : ''}${thumbs ? `<div class="agent-msg-thumbs">${thumbs}</div>` : ''}${quickActions}</div>`;
 }
 function agentMessageHtml(msg){
@@ -17773,9 +17773,15 @@ function renderAgentMessages(){
                 // 修改：聚焦输入框，预填"把这张图"
                 if(agentInput){ agentInput.value = '把这张图'; agentInput.focus(); }
             } else if(action === 'variant'){
-                // 变体：用同一 prompt 再生一张
-                const gen = msg?.generations?.find(g => (g.results || []).some(r => r?.url));
-                if(gen?.prompt){ agentSendWithText(gen.prompt); }
+                // 变体：切换数量选择气泡
+                const wrap = btn.closest('.agent-variant-wrap');
+                const pop = wrap?.querySelector('.agent-variant-pop');
+                if(pop){
+                    const wasOpen = pop.classList.contains('open');
+                    // 关闭所有其他气泡
+                    agentMessages.querySelectorAll('.agent-variant-pop.open').forEach(p => { p.classList.remove('open'); });
+                    if(!wasOpen) pop.classList.add('open');
+                }
             } else if(action === 'describe'){
                 // 反推：取最后一张生成图，发送"分析这张图，反推prompt"
                 const lastUrl = msg?.generations?.flatMap(g => (g.results || []).filter(r => r?.url)).pop()?.url;
@@ -17785,6 +17791,20 @@ function renderAgentMessages(){
                     if(agentInput){ agentInput.value = '分析这张图，反推提示词'; agentInput.focus(); }
                 }
             }
+        };
+    });
+    // 变体数量选择事件
+    agentMessages.querySelectorAll('[data-agent-variant-count]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(agentSending) return;
+            const count = Math.min(4, Math.max(1, Number(btn.dataset.agentVariantCount) || 1));
+            const msgEl = btn.closest('.agent-msg');
+            const msg = (agentState?.messages || []).find(m => m.id === msgEl?.querySelector('[data-agent-copy]')?.dataset?.agentCopy) || [...(agentState?.messages || [])].reverse().find(m => m.role === 'assistant' && m.generations?.length);
+            const gen = msg?.generations?.find(g => (g.results || []).some(r => r?.url));
+            // 关闭气泡
+            agentMessages.querySelectorAll('.agent-variant-pop.open').forEach(p => { p.classList.remove('open'); });
+            if(gen?.prompt){ agentVariantGenerate(gen, count, msg); }
         };
     });
     // 分析/提示词卡片的"用这个生图"按钮
@@ -18137,6 +18157,8 @@ Fields: "reply"=对话回复; "options"=[{label,value}]按钮选项; "collected"
     const _finalCount = Math.max(1, Math.min(8, Number(finalCount) || Number(agentState?.genCount) || 1));
     if(_finalCount > 1){
         parts.push(`【出图数量 / Output Count】系统要求生成 ${_finalCount} 张图。每张是独立的图片，在主题/品牌方向/变体方向上必须有明显差异（不能只是换个颜色或微调）。数量已由系统决定（综合工具栏设置和输入框显式要求），你无需自行判断，只需返回恰好 ${_finalCount} 条。`);
+    } else {
+        parts.push(`【出图数量 / Output Count】系统只要求生成 1 张图。prompts 数组只返回恰好 1 条，不要返回多条。`);
     }
     // P1-9: 系统提示词动态化 —— 根据思维模式开关追加不同指令（thinkingModeOn 已在上方计算）
     if(thinkingModeOn){
@@ -18821,6 +18843,10 @@ if(!Array.isArray(parsed.generations)) parsed.generations = [];
         if(requestedCount > 1 && parsed.prompts.length > requestedCount){
             parsed.prompts = parsed.prompts.slice(0, requestedCount);
         }
+        // 3c. 用户未要求多张（genCount=1）→ 强制只保留1条，防止LLM返回多条
+        if(requestedCount === 0 && parsed.prompts.length > 1){
+            parsed.prompts = parsed.prompts.slice(0, 1);
+        }
     }
     // 直接模式数量校准：如果非思维模式，校准 generations 条数到 requestedCount
     // 重要：不通过增加 count 来补充（count>1 会用同一 prompt 发多次请求，导致生成重复图）
@@ -18885,6 +18911,37 @@ function agentSendWithText(text){
     if(!text || agentSending) return;
     if(agentInput) agentInput.value = text;
     sendAgentMessage();
+}
+// 变体生成：用同一 prompt 生成 count 张变体（带差异化指令）
+async function agentVariantGenerate(sourceGen, count, sourceMsg){
+    if(!sourceGen?.prompt || agentSending) return;
+    const basePrompt = sourceGen.prompt;
+    const variantDirections = ['不同姿态与动作', '不同场景与氛围', '不同视角与构图', '不同配色与光线'];
+    const gens = [];
+    for(let i = 0; i < count; i++){
+        const direction = variantDirections[i % variantDirections.length];
+        gens.push({
+            prompt: count > 1 ? basePrompt + `（变体${i + 1}，${direction}）` : basePrompt,
+            count: 1,
+            use_last_outputs: !!sourceGen.use_last_outputs,
+            use_attachments: !!sourceGen.use_attachments,
+            results: [],
+            status: 'running'
+        });
+    }
+    const assistantMsg = {id:uid('am'), role:'assistant', text:`正在生成 ${count} 张变体...`, options:[], prompts:[], generations:gens, ts:Date.now()};
+    agentState.messages.push(assistantMsg);
+    agentState.messages = agentState.messages.slice(-AGENT_MSG_MAX);
+    renderAgentMessages();
+    saveAgentState();
+    // 找到对应的 userMsg
+    const msgs = agentState.messages || [];
+    const msgIdx = msgs.indexOf(assistantMsg);
+    let userMsg = null;
+    for(let i = msgIdx - 1; i >= 0; i--){
+        if(msgs[i].role === 'user'){ userMsg = msgs[i]; break; }
+    }
+    await runAgentGenerations(assistantMsg, userMsg);
 }
 async function sendAgentMessage(){
     if(agentSending || !agentState) return;
@@ -20034,7 +20091,7 @@ agentThinkingBtn?.addEventListener('click', () => {
     agentState.thinkingMode = !agentState.thinkingMode;
     syncAgentThinkingBtn();
     saveAgentState();
-    toast(agentState.thinkingMode ? '思维模式 ON：深度创作（多轮扩写）' : '思维模式 OFF：快速执行（直传生图）');
+    toast(agentState.thinkingMode ? '思维模式 ON：AI 会多轮追问补充细节，适合灵感探索' : '思维模式 OFF：直接执行，适合明确需求');
 });
     agentInput?.addEventListener('input', () => {
         const val = agentInput.value;
