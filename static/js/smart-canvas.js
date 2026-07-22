@@ -6860,6 +6860,46 @@ function openSmartLogLightbox(url, kind='image'){
 function smartLogPreviewNode(url, kind='image'){
     openSmartLogLightbox(url, kind);
 }
+async function deleteCanvasLogEntry(logId, deleteMedia=false){
+    if(!canvas || !canvasId || !logId) return;
+    const confirmText = deleteMedia ? tr('canvas.deleteLogMediaConfirm') : tr('canvas.deleteLogConfirm');
+    if(!confirm(confirmText)) return;
+    try {
+        if(saveTimer){
+            clearTimeout(saveTimer);
+            saveTimer = null;
+            await saveCanvas();
+        }
+        const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}/logs/delete`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                log_id:logId,
+                delete_unreferenced_media:deleteMedia,
+                reset_referencing_nodes:deleteMedia,
+                base_updated_at:Number(canvas.updated_at || 0)
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || tr('canvas.logDeleteFailed'));
+        canvas.logs = data.canvas?.logs || (canvas.logs || []).filter(item => item.id !== logId);
+        if(data.canvas?.nodes){
+            canvas.nodes = data.canvas.nodes;
+            canvas.connections = data.canvas.connections || [];
+            nodes = canvas.nodes;
+            render();
+        }
+        canvas.updated_at = Number(data.canvas?.updated_at || canvas.updated_at || Date.now());
+        renderSmartCanvasLog();
+        const notes = [tr('canvas.logDeleted')];
+        if(data.removed_files?.length) notes.push(tr('canvas.logMediaRemoved').replace('{n}', data.removed_files.length));
+        if(data.reset_node_ids?.length) notes.push(tr('canvas.logNodesReset').replace('{n}', data.reset_node_ids.length));
+        if(data.skipped_referenced?.length) notes.push(tr('canvas.logMediaReferenced').replace('{n}', data.skipped_referenced.length));
+        toast(notes.join(' · '));
+    } catch(err) {
+        toast(err?.message || tr('canvas.logDeleteFailed'));
+    }
+}
 function renderSmartCanvasLog(){
     const logs = canvas?.logs || [];
     smartLogList.innerHTML = logs.length ? logs.map(log => {
@@ -6883,7 +6923,7 @@ function renderSmartCanvasLog(){
             taskId ? `ID ${taskId}` : '',
             backend
         ].filter(Boolean);
-        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}">
+        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}" data-canvas-log-id="${escapeAttr(log.id || '')}">
             <div class="log-main">
                 <div class="log-meta">
                     <span class="log-chip ${log.status === 'failed' ? 'status-failed' : 'status-ok'}">${escapeHtml(log.status === 'failed' ? tr('canvas.failed') : tr('canvas.success'))}</span>
@@ -6894,6 +6934,10 @@ function renderSmartCanvasLog(){
                 <div class="log-subline">${subParts.map(part => `<span title="${escapeAttr(part)}">${escapeHtml(part)}</span>`).join('')}</div>
                 ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
                 <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
+                <div class="log-actions">
+                    <button type="button" data-log-delete="record"><i data-lucide="list-x"></i><span>${escapeHtml(tr('canvas.deleteLog'))}</span></button>
+                    <button type="button" class="danger" data-log-delete="media"><i data-lucide="trash-2"></i><span>${escapeHtml(tr('canvas.deleteLogAndMedia'))}</span></button>
+                </div>
             </div>
             <div class="log-thumbs">${thumbs}</div>
         </div>`;
@@ -6923,6 +6967,13 @@ function renderSmartCanvasLog(){
     };
     bindLogCopy('[data-prompt]', 'prompt');
     bindLogCopy('[data-error]', 'error');
+    smartLogList.querySelectorAll('[data-log-delete]').forEach(button => {
+        button.onclick = e => {
+            e.stopPropagation();
+            const logId = button.closest('[data-canvas-log-id]')?.dataset.canvasLogId || '';
+            deleteCanvasLogEntry(logId, button.dataset.logDelete === 'media');
+        };
+    });
     refreshIcons();
 }
 function openSmartCanvasLog(){
