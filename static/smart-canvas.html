@@ -20,7 +20,7 @@
     <script src="/static/js/theme.js?v=v2.0.1784282603"></script>
     <script src="/static/js/touch-mouse.js?v=v2.0.1784282603"></script>
     <script src="/static/js/i18n.js?v=v2.0.1784282603"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v2.0.1784691334">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=v2.0.1784744768?v2.0.1784744843">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -144,6 +144,7 @@
         <button id="smartLogToggle" class="smart-log-toggle" type="button" onclick="openSmartCanvasLog()" title="日志" aria-label="日志" data-i18n-title="canvas.logs"><i data-lucide="list-todo"></i><span data-i18n="canvas.logs">日志</span></button>
         <button id="assetToggle" class="asset-toggle" type="button"><i data-lucide="library"></i><span data-i18n="smart.assetLibrary">资产库</span></button>
         <button id="agentToggle" class="agent-toggle" type="button"><i data-lucide="bot"></i><span data-i18n="smart.agentPanel">AI Agent</span></button>
+        <button id="inspireToggle" class="inspire-toggle" type="button" title="灵感库：搜参考图、找提示词"><i data-lucide="sparkles"></i><span>灵感库</span></button>
         <aside id="smartWorkflowTransferModal" class="workflow-transfer-panel">
             <div class="workflow-transfer-head">
                 <div>
@@ -324,6 +325,39 @@
                 <div class="agent-ref-confirm-actions">
                     <button id="agentRefConfirmNo" class="agent-ref-confirm-btn secondary" type="button">取消</button>
                     <button id="agentRefConfirmYes" class="agent-ref-confirm-btn primary" type="button">确认生成</button>
+                </div>
+            </div>
+        </aside>
+        <aside id="inspirePanel" class="inspire-panel">
+            <div class="inspire-head">
+                <div class="asset-title"><i data-lucide="sparkles"></i><span>灵感库</span></div>
+                <span id="inspireCount" class="inspire-count"></span>
+                <button id="inspireSettingsBtn" class="asset-mini-btn" type="button" title="API Key 设置"><i data-lucide="key"></i></button>
+                <button id="inspireCloseBtn" class="asset-mini-btn" type="button" title="关闭"><i data-lucide="x"></i></button>
+            </div>
+            <!-- 配置页（未配置 Key 时显示，不加载图库） -->
+            <div id="inspireConfig" class="inspire-config" hidden>
+                <div class="inspire-config-icon"><i data-lucide="key-round"></i></div>
+                <div class="inspire-config-title">配置 Civitai API Key</div>
+                <div class="inspire-config-desc">灵感库使用 Civitai 公开 API（免费），汇集海量用户生成的 AI 图片。配置你自己的 Key 后即可浏览，限额更高、更稳定。</div>
+                <input id="inspireKeyInput" class="inspire-key-input" type="password" placeholder="粘贴你的 Civitai API Key" autocomplete="off">
+                <button id="inspireGetKeyBtn" class="inspire-getkey-btn" type="button"><i data-lucide="external-link"></i><span>去获取免费 Key</span></button>
+                <button id="inspireSaveKeyBtn" class="inspire-savekey-btn" type="button">保存并开始浏览</button>
+                <div class="inspire-config-tip">Key 仅存于本机浏览器，只用于请求 Civitai。</div>
+            </div>
+            <!-- 图库区（配置 Key 后显示） -->
+            <div id="inspireGallery" class="inspire-gallery">
+                <div class="inspire-search-wrap">
+                    <button id="inspireSearchBtn" class="inspire-search-btn" type="button" title="搜索"><i data-lucide="search"></i></button>
+                    <input id="inspireSearch" class="inspire-search" type="text" placeholder="搜中文/英文标签，点放大镜或按回车…" autocomplete="off">
+                </div>
+                <div id="inspireCats" class="inspire-cats"></div>
+                                <div id="inspireMoreTags" class="inspire-more-tags" hidden></div>
+                <div id="inspireScroll" class="inspire-scroll">
+                    <div id="inspireGrid" class="inspire-grid"></div>
+                    <div id="inspireLoader" class="inspire-loader" hidden><span class="agent-gen-spinner"></span><span>加载中…</span></div>
+                    <div id="inspireEnd" class="inspire-end" hidden>没有更多了</div>
+                    <div id="inspireEmpty" class="inspire-empty" hidden>没有找到相关图片</div>
                 </div>
             </div>
         </aside>
@@ -571,6 +605,6 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v2.0.1784690992"></script>
+    <script src="/static/js/smart-canvas.js?v=v2.0.1784744736?v2.0.1784744843"></script>
 </body>
 </html>

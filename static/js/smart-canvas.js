@@ -8077,7 +8077,7 @@ function handlePortDrop(drag, e){
         return;
     }
     if(!drag.moved){ discardPendingUndo(); render(); return; }
-    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
+    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
         discardPendingUndo(); render(); return;
     }
     const p = screenToWorld(e);
@@ -15725,14 +15725,14 @@ function createNodeFromMenu(type){
 shell.addEventListener('mousedown', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
 }, true);
 shell.addEventListener('click', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
     const nodeEl = e.target.closest('.image-node');
@@ -15740,8 +15740,8 @@ shell.addEventListener('click', e => {
     else exitZoomPreview(screenToWorld(e));
 }, true);
 shell.onmousedown = e => {
-    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
-    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
+    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
     closeCreateMenu();
     if(e.button === 0 && e.shiftKey){
         e.preventDefault();
@@ -15778,7 +15778,7 @@ shell.oncontextmenu = e => {
         e.stopPropagation();
         return;
     }
-    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -15794,14 +15794,14 @@ shell.oncontextmenu = e => {
     openCreateMenu(e);
 };
 shell.ondblclick = e => {
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     openCreateMenu(e);
 };
 shell.onclick = e => {
     if(selectionJustFinished) return;
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     closeCreateMenu();
     clearSelection();
@@ -16310,7 +16310,7 @@ window.onmouseup = e => {
     }
 };
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
+    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.agent-panel,.agent-toggle,.inspire-panel,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
     e.preventDefault();
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -16328,6 +16328,18 @@ shell.ondrop = async e => {
     e.preventDefault();
     if(e.target.closest('.image-node')) return;
     const p = screenToWorld(e);
+    // 灵感库拖拽：内容脚本已通过 postMessage 暂存图片+提示词（绕开跨域 dataTransfer 限制）
+    if(pendingInspireDrag && pendingInspireDrag.imageUrl){
+        const drag = pendingInspireDrag;
+        pendingInspireDrag = null;
+        pushUndo();
+        createImageNodeAt(p, [{url:drag.imageUrl, name:'inspire-' + Date.now() + '.png', kind:'image'}], {skipUndo:true});
+        if(drag.prompt) setPromptText(drag.prompt);
+        render();
+        scheduleSave();
+        toast(drag.prompt ? '已拖入灵感图 + 提示词' : '已拖入灵感图');
+        return;
+    }
     const assetRaw = e.dataTransfer.getData('application/x-smart-asset');
     if(assetRaw){
         try {
@@ -17225,6 +17237,383 @@ function toggleAgentPanel(open=!agentOpen){
     if(agentOpen){
         renderAgentModelSelectors();
         renderAgentMessages();
+    }
+}
+// ============ 灵感库（Civitai AI 图片源 · 用户生成 AI 图） ============
+const INSPIRE_SORTS = [
+    {id:'Most Reactions', name:'热门'},
+    {id:'Newest', name:'最新'},
+    {id:'Most Liked', name:'点赞'},
+    {id:'Most Collected', name:'收藏'}
+];
+// 搜索方案A：中文分类 chips（映射 Civitai 英文 tag）
+const INSPIRE_TAGS = [
+    {zh:'全部', tag:''},
+    {zh:'人物', tag:'1girl'},
+    {zh:'风景', tag:'landscape'},
+    {zh:'动漫', tag:'anime'},
+    {zh:'写实', tag:'photorealistic'},
+    {zh:'赛博朋克', tag:'cyberpunk'},
+    {zh:'奇幻', tag:'fantasy'},
+    {zh:'机甲', tag:'mecha'},
+    {zh:'建筑', tag:'architecture'},
+    {zh:'城市', tag:'city'},
+    {zh:'肖像', tag:'portrait'},
+    {zh:'概念设计', tag:'concept art'},
+    {zh:'插画', tag:'illustration'},
+    {zh:'水墨国风', tag:'chinese style'},
+    {zh:'可爱', tag:'cute'},
+    {zh:'科幻', tag:'sci-fi'}
+];
+// 搜索方案B：中文→英文搜索词典（常见美术词）
+const INSPIRE_ZH_EN = {
+    '女孩':'1girl','男孩':'1boy','人物':'1girl','美女':'1girl','风景':'landscape','景色':'landscape','动漫':'anime','漫画':'anime',
+    '写实':'photorealistic','真实':'photorealistic','照片':'photorealistic','摄影':'photorealistic','赛博朋克':'cyberpunk','奇幻':'fantasy','魔法':'magic',
+    '机甲':'mecha','机器人':'robot','建筑':'architecture','房子':'architecture','城市':'city','街景':'cityscape','夜景':'night','夜晚':'night',
+    '肖像':'portrait','头像':'portrait','概念设计':'concept art','概念':'concept art','插画':'illustration','水墨':'chinese style','国风':'chinese style','中国风':'chinese style',
+    '可爱':'cute','萌':'cute','科幻':'sci-fi','未来':'futuristic','水彩':'watercolor','油画':'oil painting','素描':'sketch','像素':'pixel art',
+    '吉卜力':'ghibli','极简':'minimalism','复古':'retro','蒸汽朋克':'steampunk','龙':'dragon','猫':'cat','狗':'dog','花':'flower',
+    '植物':'plant','海洋':'ocean','大海':'ocean','山':'mountain','森林':'forest','雪':'snow','沙漠':'desert','战士':'warrior',
+    '骑士':'knight','巫师':'wizard','飞船':'spaceship','汽车':'car','美食':'food','食物':'food','甜点':'food','少女':'1girl','男神':'1boy',
+    '海报':'poster','宣传海报':'poster','设计':'design','logo':'logo','图标':'icon','壁纸':'wallpaper','头像':'avatar','封面':'cover',
+    '产品':'product','商品':'product','电商':'e-commerce','包装':'packaging','名片':'business card','插画':'illustration',
+    '二次元':'anime','国风':'chinese style','古风':'chinese style','像素风':'pixel art','蒸汽波':'vaporwave','暗黑':'dark','唯美':'aesthetic'
+};
+// 「更多标签」分组面板数据（中文标签 → Civitai 英文 tag）
+const INSPIRE_TAG_GROUPS = [
+    { name:'人物', tags:[['少女','1girl'],['男孩','1boy'],['肖像','portrait'],['战士','warrior'],['骑士','knight'],['巫师','wizard'],['美女','1girl']] },
+    { name:'风格', tags:[['动漫','anime'],['写实','photorealistic'],['赛博朋克','cyberpunk'],['奇幻','fantasy'],['水墨国风','chinese style'],['像素风','pixel art'],['蒸汽朋克','steampunk'],['吉卜力','ghibli'],['复古','retro'],['蒸汽波','vaporwave'],['唯美','aesthetic'],['暗黑','dark'],['水彩','watercolor'],['油画','oil painting'],['素描','sketch']] },
+    { name:'场景', tags:[['风景','landscape'],['城市','city'],['街景','cityscape'],['夜景','night'],['森林','forest'],['海洋','ocean'],['山','mountain'],['沙漠','desert'],['建筑','architecture'],['雪','snow']] },
+    { name:'生物·物体', tags:[['猫','cat'],['狗','dog'],['龙','dragon'],['机甲','mecha'],['机器人','robot'],['汽车','car'],['飞船','spaceship'],['花','flower'],['植物','plant'],['美食','food']] },
+    { name:'设计', tags:[['海报','poster'],['logo','logo'],['图标','icon'],['壁纸','wallpaper'],['封面','cover'],['产品','product'],['包装','packaging'],['名片','business card'],['插画','illustration'],['设计','design']] },
+    { name:'概念', tags:[['概念设计','concept art'],['科幻','sci-fi'],['未来','futuristic'],['可爱','cute'],['极简','minimalism'],['魔法','magic']] },
+];
+let inspireOpen = false;
+let inspireCursor = '';
+let inspireLoading = false;
+let inspireHasMore = true;
+let inspireSort = 'Most Reactions';
+let inspireTag = '';
+let inspireLoadedCount = 0;
+let inspireSeenIds = new Set();   // 浏览去重
+const _inspireCache = {};          // TTL 缓存
+const INSPIRE_CACHE_TTL = 15 * 60 * 1000;  // 15 分钟
+// ---- API Key 管理 ----
+function getCivitaiKey(){ try { return localStorage.getItem('civitai_api_key') || ''; } catch(e){ return ''; } }
+function saveCivitaiKey(k){ try { if(k) localStorage.setItem('civitai_api_key', k); else localStorage.removeItem('civitai_api_key'); } catch(e){} }
+// ---- 配置页 / 图库 切换 ----
+function showInspireConfig(show){
+    const config = document.getElementById('inspireConfig');
+    const gallery = document.getElementById('inspireGallery');
+    if(config) config.hidden = !show;
+    if(gallery) gallery.style.display = show ? 'none' : 'flex';
+    if(show){
+        const input = document.getElementById('inspireKeyInput');
+        if(input) input.value = getCivitaiKey();
+    }
+}
+function toggleInspirePanel(open=!inspireOpen){
+    const panel = document.getElementById('inspirePanel');
+    const toggle = document.getElementById('inspireToggle');
+    if(!panel || !toggle) return;
+    inspireOpen = !!open;
+    if(inspireOpen){ toggleAgentPanel(false); toggleAssetLibrary(false); }
+    panel.classList.toggle('open', inspireOpen);
+    toggle.classList.toggle('active', inspireOpen);
+    if(inspireOpen){
+        const hasKey = !!getCivitaiKey();
+        showInspireConfig(!hasKey);   // 无 Key → 配置页，不加载图库
+        if(hasKey){
+            renderInspireCats();
+            const grid = document.getElementById('inspireGrid');
+            if(grid && !grid.dataset.loaded) loadInspirePage(true);
+        }
+    }
+}
+// ---- 分类 chips（中文） ----
+function renderInspireCats(){
+    const wrap = document.getElementById('inspireCats');
+    if(!wrap) return;
+    const chips = INSPIRE_TAGS.map(c => `<button class="inspire-cat ${c.tag === inspireTag ? 'active' : ''}" type="button" data-inspire-tag="${escapeAttr(c.tag)}">${escapeHtml(c.zh)}</button>`).join('');
+    wrap.innerHTML = chips + '<button class="inspire-cat more" type="button" id="inspireMoreBtn">更多标签 ▾</button>';
+    wrap.querySelectorAll('[data-inspire-tag]').forEach(btn => {
+        btn.onclick = () => {
+            const tag = btn.dataset.inspireTag || '';
+            if(tag === inspireTag) return;
+            inspireTag = tag;
+            const search = document.getElementById('inspireSearch');
+            if(search) search.value = '';
+            closeInspireMoreTags();
+            renderInspireCats();
+            resetInspireAndLoad();
+        };
+    });
+    const moreBtn = document.getElementById('inspireMoreBtn');
+    if(moreBtn) moreBtn.onclick = () => toggleInspireMoreTags();
+}
+// ---- 「更多标签」分组下拉面板 ----
+function renderInspireMoreTags(){
+    const panel = document.getElementById('inspireMoreTags');
+    if(!panel || panel.dataset.rendered) return;
+    panel.dataset.rendered = '1';
+    panel.innerHTML = INSPIRE_TAG_GROUPS.map(g =>
+        '<div class="inspire-mt-group"><div class="inspire-mt-name">' + escapeHtml(g.name) + '</div><div class="inspire-mt-tags">' +
+        g.tags.map(t => '<button class="inspire-mt-tag" type="button" data-mt-tag="' + escapeAttr(t[1]) + '" data-mt-zh="' + escapeAttr(t[0]) + '">' + escapeHtml(t[0]) + '</button>').join('') +
+        '</div></div>'
+    ).join('');
+    panel.querySelectorAll('[data-mt-tag]').forEach(btn => {
+        btn.onclick = () => {
+            inspireTag = btn.dataset.mtTag || '';
+            const search = document.getElementById('inspireSearch');
+            if(search) search.value = btn.dataset.mtZh || '';
+            closeInspireMoreTags();
+            renderInspireCats();
+            resetInspireAndLoad();
+        };
+    });
+}
+function toggleInspireMoreTags(){
+    const panel = document.getElementById('inspireMoreTags');
+    if(!panel) return;
+    if(panel.hidden){ renderInspireMoreTags(); updateInspireMoreActive(); panel.hidden = false; }
+    else { panel.hidden = true; }
+}
+function closeInspireMoreTags(){
+    const panel = document.getElementById('inspireMoreTags');
+    if(panel) panel.hidden = true;
+}
+function updateInspireMoreActive(){
+    const panel = document.getElementById('inspireMoreTags');
+    if(!panel) return;
+    panel.querySelectorAll('[data-mt-tag]').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.mtTag || '') === inspireTag);
+    });
+}
+function resetInspireAndLoad(){
+    inspireCursor = '';
+    inspireHasMore = true;
+    inspireLoadedCount = 0;
+    inspireSeenIds = new Set();
+    const grid = document.getElementById('inspireGrid');
+    if(grid){ grid.innerHTML = ''; delete grid.dataset.loaded; }
+    const end = document.getElementById('inspireEnd');
+    if(end) end.hidden = true;
+    const sc = document.getElementById('inspireScroll');
+    if(sc) sc.scrollTop = 0;
+    loadInspirePage(true);
+}
+// ---- TTL 缓存 ----
+function _inspireCacheKey(){ return inspireSort + '|' + inspireTag + '|' + inspireCursor; }
+function _inspireCacheGet(key){
+    const c = _inspireCache[key];
+    if(c && (Date.now() - c.ts < INSPIRE_CACHE_TTL)) return c.data;
+    if(c) delete _inspireCache[key];
+    return null;
+}
+function _inspireCacheSet(key, data){ _inspireCache[key] = {data, ts:Date.now()}; }
+// ---- 数据加载（带 Key + 429 降级 + 缓存 + 去重） ----
+async function loadInspirePage(reset=false){
+    if(inspireLoading || (!inspireHasMore && !reset)) return;
+    inspireLoading = true;
+    const loader = document.getElementById('inspireLoader');
+    const empty = document.getElementById('inspireEmpty');
+    const end = document.getElementById('inspireEnd');
+    const grid = document.getElementById('inspireGrid');
+    if(loader) loader.hidden = false;
+    if(empty) empty.hidden = true;
+    if(end) end.hidden = true;
+    const cacheKey = _inspireCacheKey();
+    let data = _inspireCacheGet(cacheKey);
+    if(!data){
+        const params = new URLSearchParams({ limit:'24', sort:inspireSort });
+        if(inspireTag) params.set('tag', inspireTag);
+        if(inspireCursor) params.set('cursor', inspireCursor);
+        try {
+            const resp = await fetch('/api/inspire-civitai?' + params.toString(), { headers:{ 'X-Civitai-Key': getCivitaiKey() } });
+            if(resp.status === 429){
+                if(loader) loader.hidden = true;
+                inspireLoading = false;
+                toast('Civitai 限流：请稍后再试（配置 Key 可提高限额）');
+                if(reset && grid && !grid.children.length) grid.innerHTML = '<div class="inspire-empty">限流了，请稍后再试</div>';
+                return;
+            }
+            if(!resp.ok) throw new Error('HTTP ' + resp.status);
+            data = await resp.json();
+            _inspireCacheSet(cacheKey, data);
+        } catch(e){
+            console.warn('[inspire] Civitai 加载失败:', e);
+            if(loader) loader.hidden = true;
+            inspireLoading = false;
+            if(reset && grid) grid.innerHTML = '<div class="inspire-empty">加载失败，请检查网络后重试</div>';
+            else if(!reset) toast('加载更多失败');
+            return;
+        }
+    }
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    inspireCursor = data.cursor || '';
+    inspireHasMore = !!data.hasMore;
+    // 浏览去重：跳过已展示的 ID
+    const items = rawItems.filter(it => {
+        const id = it.id;
+        if(id != null && inspireSeenIds.has(id)) return false;
+        if(id != null) inspireSeenIds.add(id);
+        return true;
+    });
+    inspireLoadedCount += items.length;
+    const cnt = document.getElementById('inspireCount');
+    if(cnt) cnt.textContent = '已加载 ' + inspireLoadedCount + ' 张';
+    if(reset && items.length === 0){
+        if(grid) grid.innerHTML = '';
+        if(empty) empty.hidden = false;
+    } else {
+        appendInspireCards(items);
+        if(grid) grid.dataset.loaded = '1';
+    }
+    if(!inspireHasMore && end) end.hidden = false;   // 到底提示
+    if(loader) loader.hidden = true;
+    inspireLoading = false;
+}
+function appendInspireCards(items){
+    const grid = document.getElementById('inspireGrid');
+    if(!grid) return;
+    items.forEach(it => {
+        const imgUrl = it.thumb || it.image;
+        if(!imgUrl) return;
+        const card = document.createElement('div');
+        card.className = 'inspire-card';
+        const promptText = it.prompt || '';
+        const authorLine = it.username
+            ? '<div class="inspire-overlay-author">@' + escapeHtml(it.username) + (it.model ? ' · ' + escapeHtml(it.model) : '') + '</div>'
+            : (it.model ? '<div class="inspire-overlay-author">' + escapeHtml(it.model) + '</div>' : '');
+        const overlayBody = promptText
+            ? '<div class="inspire-overlay-prompt">' + escapeHtml(promptText) + '</div>'
+            : '<div class="inspire-overlay-prompt">AI 生成图（作者未共享提示词）</div>';
+        card.innerHTML = '<img loading="lazy" decoding="async" alt="">'
+            + '<div class="inspire-overlay">'
+            + authorLine
+            + overlayBody
+            + '<button class="inspire-overlay-btn" type="button"><i data-lucide="import"></i><span>导入到画布</span></button>'
+            + '</div>';
+        const img = card.querySelector('img');
+        // 按真实宽高预留比例，避免懒加载时布局上下跳动
+        if(it.width && it.height){ img.style.aspectRatio = it.width + ' / ' + it.height; }
+        img.src = imgUrl;
+        img.addEventListener('load', () => img.classList.add('loaded'));
+        // 加载失败重试：自动重试1次 + 点击重试
+        img.addEventListener('error', () => {
+            if(img.dataset.retried){ img.classList.add('loaded'); img.style.minHeight = '90px'; img.style.cursor = 'pointer'; img.title = '加载失败，点击重试'; }
+            else { img.dataset.retried = '1'; setTimeout(() => { const s = img.src; img.src = ''; img.src = s; }, 1500); }
+        });
+        img.addEventListener('click', () => {
+            if(img.dataset.retried && img.naturalWidth === 0){ delete img.dataset.retried; img.classList.remove('loaded'); img.style.minHeight=''; const s = img.src; img.src=''; img.src=s; }
+        });
+        card.querySelector('.inspire-overlay-btn').addEventListener('click', e => { e.stopPropagation(); importInspireToCanvas(it); });
+        grid.appendChild(card);
+    });
+    if(window.lucide) lucide.createIcons();
+}
+// ---- 导入：本地化 + 节点去重 + 来源署名 + 反馈 ----
+function findInspireNode(civitaiId){
+    if(civitaiId == null || civitaiId === '') return null;
+    return (typeof nodes !== 'undefined' ? nodes : []).find(n => (n.images || []).some(img => String(img.civitaiId || '') === String(civitaiId)));
+}
+async function importInspireToCanvas(it){
+    const url = it.image || it.thumb;
+    if(!url){ toast('该图片无法导入'); return; }
+    // 节点去重：画布已有同图 → 选中它
+    const existing = findInspireNode(it.id);
+    if(existing){
+        selectedId = existing.id; selectedIds = [existing.id];
+        render();
+        const r = nodeRect(existing);
+        if(r) agentCenterOnPoint(r.x + r.width/2, r.y + r.height/2);
+        toast('这张图已在画布中');
+        return;
+    }
+    toast('正在导入到画布…');
+    try {
+        const locResp = await fetch('/api/inspire-localize', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, id:String(it.id || '') }) });
+        if(!locResp.ok) throw new Error('localize failed');
+        const loc = await locResp.json();
+        const localUrl = loc.url || url;
+        const prompt = it.prompt || '';
+        const imgObj = {
+            url: localUrl,
+            name: 'civitai_' + (it.id || Date.now()) + '.jpg',
+            kind: 'image',
+            civitaiId: String(it.id || ''),
+            civitaiSource: it.id ? ('https://civitai.com/images/' + it.id) : '',
+            civitaiAuthor: it.username || ''
+        };
+        const hadNode = !!selectedNode();
+        try { addManualReferenceToSelectedNode(imgObj); } catch(e){ console.warn('[inspire] 挂参考图失败', e); }
+        const pos = agentFindEmptyPosition(1);
+        const node = createImageNodeAt(pos, [{ ...imgObj }]);
+        if(node) node.runFinishedAt = nowMs();
+        render();
+        scheduleSave();
+        if(prompt) setPromptText(prompt);
+        toast(prompt ? '已导入：参考图 + 提示词（来源 Civitai @' + (it.username || '匿名') + '）' : '已导入参考图（来源 Civitai）');
+    } catch(e){
+        console.warn('[inspire] 导入失败', e);
+        toast('导入失败，请重试');
+    }
+}
+function initInspireScroll(){
+    const sc = document.getElementById('inspireScroll');
+    if(!sc || sc.dataset.inspireScrollInit) return;
+    sc.dataset.inspireScrollInit = '1';
+    sc.addEventListener('scroll', () => {
+        if(!inspireOpen || inspireLoading || !inspireHasMore) return;
+        if(sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 500) loadInspirePage(false);
+    });
+}
+// ---- 搜索 A+B：中文词典映射 + 回车/按钮触发 ----
+function initInspireSearch(){
+    const input = document.getElementById('inspireSearch');
+    const btn = document.getElementById('inspireSearchBtn');
+    if(!input || input.dataset.inspireSearchInit) return;
+    input.dataset.inspireSearchInit = '1';
+    const doSearch = () => {
+        const raw = input.value.trim();
+        const tag = raw ? (INSPIRE_ZH_EN[raw] || raw) : '';   // 中文→英文，未命中则原样
+        inspireTag = tag;
+        renderInspireCats();
+        resetInspireAndLoad();
+    };
+    // 回车触发（兼容中文输入法：isComposing 时不触发）
+    input.addEventListener('keydown', e => {
+        if(e.key === 'Enter' && !e.isComposing && e.keyCode !== 229){ e.preventDefault(); doSearch(); }
+    });
+    // 点击放大镜按钮触发（避免输入法回车问题）
+    if(btn) btn.addEventListener('click', () => doSearch());
+}
+// ---- 配置页事件 ----
+function initInspireConfig(){
+    const getKeyBtn = document.getElementById('inspireGetKeyBtn');
+    const saveBtn = document.getElementById('inspireSaveKeyBtn');
+    const settingsBtn = document.getElementById('inspireSettingsBtn');
+    if(getKeyBtn && !getKeyBtn.dataset.init){
+        getKeyBtn.dataset.init = '1';
+        getKeyBtn.addEventListener('click', () => window.open('https://civitai.com/user/account', '_blank', 'noopener'));
+    }
+    if(saveBtn && !saveBtn.dataset.init){
+        saveBtn.dataset.init = '1';
+        saveBtn.addEventListener('click', () => {
+            const input = document.getElementById('inspireKeyInput');
+            const key = (input?.value || '').trim();
+            if(!key){ toast('请先输入 API Key'); return; }
+            saveCivitaiKey(key);
+            toast('已保存，正在加载灵感库…');
+            showInspireConfig(false);
+            renderInspireCats();
+            const grid = document.getElementById('inspireGrid');
+            if(grid && !grid.dataset.loaded) loadInspirePage(true);
+        });
+    }
+    if(settingsBtn && !settingsBtn.dataset.init){
+        settingsBtn.dataset.init = '1';
+        settingsBtn.addEventListener('click', () => showInspireConfig(true));   // 回配置页改 Key
     }
 }
 function chatRequestedImageCount(text){
@@ -19993,6 +20382,42 @@ function initAgentPanel(){
         if(!e.target.closest('.agent-toolbar-dropdown-wrap') && !e.target.closest('.agent-dropdown-panel')) closeAllDropdowns();
     }, true);
     agentToggle?.addEventListener('click', () => toggleAgentPanel());
+document.getElementById('inspireToggle')?.addEventListener('click', () => toggleInspirePanel());
+document.getElementById('inspireCloseBtn')?.addEventListener('click', () => toggleInspirePanel(false));
+initInspireScroll();
+initInspireSearch();
+initInspireConfig();
+// ============ 灵感库 ← 内容脚本通信（图片+提示词送回画布） ============
+let pendingInspireDrag = null;
+let _pendingInspireDragTimer = null;
+function handleInspireImageToCanvas(imageUrl, prompt){
+    const url = String(imageUrl || '');
+    if(!url) return;
+    const pos = agentFindEmptyPosition(1);
+    const node = createImageNodeAt(pos, [{url, name:'inspire-' + Date.now() + '.png', kind:'image'}]);
+    if(node) node.runFinishedAt = nowMs();
+    render();
+    scheduleSave();
+    if(prompt) setPromptText(prompt);
+    toast(prompt ? '已接收灵感图 + 提示词（填入下方输入框）' : '已接收灵感图');
+}
+window.addEventListener('message', e => {
+    const d = e.data;
+    if(!d || typeof d !== 'object') return;
+    if(d.type === 'inspire-to-canvas'){
+        // 「发送到画布」按钮：直接创建节点 + 填提示词
+        handleInspireImageToCanvas(d.imageUrl, d.prompt);
+    } else if(d.type === 'inspire-drag-payload'){
+        // 拖拽开始：暂存图片+提示词，等画布 ondrop 取用
+        pendingInspireDrag = {imageUrl:String(d.imageUrl || ''), prompt:String(d.prompt || '')};
+        clearTimeout(_pendingInspireDragTimer);
+        // 兜底：6秒内没有 drop 就清空（防止拖拽取消后残留）
+        _pendingInspireDragTimer = setTimeout(() => { pendingInspireDrag = null; }, 6000);
+    } else if(d.type === 'inspire-drag-end'){
+        // 拖拽结束（未 drop）：稍延迟清空，给 ondrop 留处理时间
+        setTimeout(() => { pendingInspireDrag = null; }, 100);
+    }
+});
     agentCloseBtn?.addEventListener('click', () => toggleAgentPanel(false));
     document.getElementById('agentNewChatBtn')?.addEventListener('click', () => agentNewChat());
     document.getElementById('agentDeleteChatBtn')?.addEventListener('click', () => agentDeleteChat());

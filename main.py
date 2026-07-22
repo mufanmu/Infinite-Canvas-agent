@@ -1800,6 +1800,224 @@ def parse_prompt_template_markdown(text: str):
         })
     return templates
 
+YOUMIND_PROMPTS_API = "https://youmind.com/youmarketing-api/prompts"
+
+@app.get("/api/inspire-prompts")
+async def inspire_prompts(
+    q: str = "",
+    category: str = "",
+    page: int = 1,
+    limit: int = 20,
+    sort_by: str = "views",
+):
+    """灵感库提示词数据代理：转发 YouMind 公开提示词 API（提示词 + 参考图 + 分类 + 分页）。
+    YouMind API 有简单防盗链（校验 Origin/Referer），此处伪造请求头绕过；图片无防盗链，前端直连。"""
+    payload = {
+        "model": "gpt-image-2",
+        "sortBy": sort_by if sort_by in ("views", "latest", "likes") else "views",
+        "sortOrder": "desc",
+        "page": max(1, int(page)),
+        "limit": min(60, max(1, int(limit))),
+        "locale": "zh-CN",
+    }
+    if q and q.strip():
+        payload["q"] = q.strip()
+    if category and category.strip():
+        payload["categories"] = category.strip()
+    headers = {
+        "Content-Type": "application/json",
+        "Origin": "https://youmind.com",
+        "Referer": "https://youmind.com/zh-CN/gpt-image-2-prompts/explore",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0)) as client:
+            resp = await client.post(YOUMIND_PROMPTS_API, json=payload, headers=headers)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"提示词库请求失败：{e}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"提示词库上游错误：{resp.status_code}")
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="提示词库响应解析失败")
+    items = []
+    for p in data.get("prompts", []) or []:
+        media = p.get("media") or []
+        thumbs = p.get("mediaThumbnails") or []
+        refs = p.get("referenceImages") or []
+        cats = p.get("promptCategories") or []
+        cat_slugs = [c.get("slug") if isinstance(c, dict) else c for c in cats]
+        items.append({
+            "id": p.get("id"),
+            "title": p.get("title") or "",
+            "description": p.get("description") or "",
+            "prompt": p.get("content") or "",
+            "promptZh": p.get("translatedContent") or "",
+            "image": media[0] if media else "",
+            "thumb": thumbs[0] if thumbs else (media[0] if media else ""),
+            "refs": refs,
+            "needRefs": bool(p.get("needReferenceImages")),
+            "categories": cat_slugs,
+            "likes": p.get("likes") or 0,
+        })
+    return {
+        "items": items,
+        "total": data.get("total") or 0,
+        "page": data.get("page") or page,
+        "totalPages": data.get("totalPages") or 0,
+        "hasMore": bool(data.get("hasMore")),
+    }
+
+CIVITAI_IMAGES_API = "https://civitai.com/api/v1/images"
+CIVITAI_SEARCH_API = "https://search-new.civitai.com/multi-search"
+# Civitai 前端内置的 Meilisearch 公开搜索 key（仅搜索、无写入权限，免登录可用）
+CIVITAI_SEARCH_KEY = "8c46eb2508e21db1e9828a97968d91ab1ca1caa5f70a00e88a2ba1e286603b61"
+CIVITAI_IMG_CDN = "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA"
+
+async def civitai_meili_search(query: str, limit: int, cursor: str):
+    """通过 Civitai 的 Meilisearch 搜索图片（真正的关键词搜索，返回 prompt+tags）。"""
+    offset = int(cursor) if str(cursor).isdigit() else 0
+    body = {"queries": [{
+        "q": query,
+        "indexUid": "images_v6",
+        "limit": limit,
+        "offset": offset,
+        "filter": ["(poi != true) AND (combinedNsfwLevel=1)"]
+    }]}
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {CIVITAI_SEARCH_KEY}"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0)) as client:
+            resp = await client.post(CIVITAI_SEARCH_API, json=body, headers=headers)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Civitai 搜索失败：{e}")
+    if resp.status_code == 429:
+        raise HTTPException(status_code=429, detail="Civitai 限流：请稍后再试")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Civitai 搜索错误：{resp.status_code}")
+    data = resp.json()
+    result = (data.get("results") or [{}])[0]
+    hits = result.get("hits") or []
+    total = result.get("estimatedTotalHits") or 0
+    items = []
+    for h in hits:
+        url = h.get("url") or ""
+        if not url: continue
+        prompt = h.get("prompt") or ""
+        items.append({
+            "id": h.get("id"),
+            "image": f"{CIVITAI_IMG_CDN}/{url}/original=true/{url}.jpeg",
+            "thumb": f"{CIVITAI_IMG_CDN}/{url}/width=500/{url}.jpeg",
+            "prompt": prompt,
+            "promptZh": "",
+            "title": "",
+            "description": prompt[:100],
+            "width": h.get("width"),
+            "height": h.get("height"),
+            "model": "",
+            "username": (h.get("user") or {}).get("username") or "",
+            "tags": h.get("tagNames") or [],
+        })
+    next_offset = offset + limit
+    has_more = bool(hits) and next_offset < total
+    return {"items": items, "cursor": str(next_offset) if has_more else "", "hasMore": has_more, "total": total}
+
+@app.get("/api/inspire-civitai")
+async def inspire_civitai(request: Request, cursor: str = "", limit: int = 24, sort: str = "Most Reactions", tag: str = ""):
+    """灵感库 Civitai 数据源：用户生成的 AI 图片（参考性强）。
+    Civitai 接口必须带 User-Agent 头，否则返回空。游标分页。
+    可选 API Key（前端经 X-Civitai-Key 头传入），带 Key 限额更高、更稳定。
+    tag 非空时走 Meilisearch 真搜索；否则走 /api/v1/images 排序浏览。"""
+    limit = min(100, max(1, int(limit)))
+    search_query = (tag or "").strip()
+    # 搜索模式：tag 非空 → Meilisearch 关键词搜索
+    if search_query:
+        return await civitai_meili_search(search_query, limit, cursor)
+    # 浏览模式：/api/v1/images + sort
+    params = {"limit": str(limit), "nsfw": "false"}
+    if sort: params["sort"] = sort
+    if cursor: params["cursor"] = cursor
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Content-Type": "application/json",
+    }
+    civitai_key = (request.headers.get("x-civitai-key") or "").strip()
+    if civitai_key:
+        headers["Authorization"] = f"Bearer {civitai_key}"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=40.0, write=20.0, pool=15.0)) as client:
+            resp = await client.get(CIVITAI_IMAGES_API, params=params, headers=headers)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Civitai 请求失败：{e}")
+    if resp.status_code == 429:
+        raise HTTPException(status_code=429, detail="Civitai 限流：请求太频繁，请稍后再试（配置 API Key 可提高限额）")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Civitai 上游错误：{resp.status_code}")
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Civitai 响应解析失败")
+    items = []
+    for it in data.get("items", []) or []:
+        url = it.get("url") or ""
+        if not url: continue
+        thumb = url.replace("original=true", "width=400")  # 缩略图（宽400，兼顾清晰与加载速度）
+        meta = it.get("meta") or {}
+        prompt = meta.get("prompt") or ""
+        tags = [t.get("name") if isinstance(t, dict) else t for t in (it.get("tags") or [])]
+        items.append({
+            "id": it.get("id"),
+            "image": url,
+            "thumb": thumb,
+            "prompt": prompt,
+            "promptZh": "",
+            "title": "",
+            "description": prompt[:100] if prompt else "",
+            "width": it.get("width"),
+            "height": it.get("height"),
+            "model": it.get("baseModel") or "",
+            "username": it.get("username") or "",
+            "tags": tags,
+        })
+    next_cursor = (data.get("metadata") or {}).get("nextCursor") or ""
+    return {
+        "items": items,
+        "cursor": next_cursor,
+        "hasMore": bool(next_cursor),
+    }
+
+class InspireLocalizeRequest(BaseModel):
+    url: str
+    id: str = ""
+
+@app.post("/api/inspire-localize")
+async def inspire_localize(payload: InspireLocalizeRequest):
+    """把 Civitai 图片下载保存到本地（中等高清 width=1024），按 civitaiId 命名实现去重。
+    已本地化过的直接返回本地地址，不重复下载。"""
+    url = (payload.url or "").strip()
+    cid = str(payload.id or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="缺少图片地址")
+    safe_id = re.sub(r"[^0-9a-zA-Z_-]", "", cid) or uuid.uuid4().hex[:10]
+    filename = f"civitai_{safe_id}.jpg"
+    path = output_path_for(filename, "output")
+    # 去重：已本地化过直接返回本地地址
+    if os.path.isfile(path):
+        return {"url": output_url_for(filename, "output"), "cached": True}
+    # 中等高清：width=1024
+    dl_url = url.replace("original=true", "width=1024")
+    try:
+        timeout = httpx.Timeout(connect=20.0, read=120.0, write=60.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            resp = await client.get(dl_url, headers={"User-Agent": "Mozilla/5.0 Chrome/124.0 Safari/537.36"})
+            resp.raise_for_status()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(resp.content)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"图片本地化失败：{e}")
+    return {"url": output_url_for(filename, "output"), "cached": False}
+
 @app.get("/api/app-info")
 def app_info():
     version = current_app_version()
