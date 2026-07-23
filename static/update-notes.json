@@ -1,18 +1,14 @@
 {
-  "version": "2026.07.15",
-  "updated_at": "2026-07-15T21:14:36+08:00",
+  "version": "2026.07.17",
+  "updated_at": "2026-07-17T21:50:36+08:00",
   "items": [
     {
       "type": "feature",
-      "text": "增加素材库批量管理/更换存储位置功能"
+      "text": "修复exellome和FHL的编辑功能报错bug"
     },
     {
       "type": "feature",
-      "text": "增加智能画布shift批量断开连线功能"
-    },
-    {
-      "type": "feature",
-      "text": "修复RunningHub调用API生成视频报错问题"
+      "text": "修复mac系统缩放bug"
     }
   ]
 }

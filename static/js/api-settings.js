@@ -92,8 +92,8 @@ const LINGJING_REGISTER_URL = 'https://apistudio.vip/register?aff=g1CT';
 const VIP_GPT_DEFAULT_BASE_URL = 'https://www.vip-gpt.net';
 const VIP_GPT_REGISTER_URL = 'https://www.vip-gpt.net/vip-gpt/register?aff=YGMS7BDKNY5Y';
 const EXAMPLE_BASE_URL = 'https://api.example.com/v1';
-const JIMENG_DEFAULT_IMAGE_MODELS = ['5.0', '4.6', '4.5', '4.1', '4.0', '3.1', '3.0'];
-const JIMENG_DEFAULT_VIDEO_MODELS = ['seedance2.0fast_vip', 'seedance2.0_vip'];
+const JIMENG_DEFAULT_IMAGE_MODELS = ['5.0Pro', '5.0', '4.7', '4.6', '4.5', '4.1', '4.0', '3.1', '3.0'];
+const JIMENG_DEFAULT_VIDEO_MODELS = ['seedance2.0fast_vip', 'seedance2.0_vip', 'seedance2.0', 'seedance2.0fast', 'seedance2.0mini'];
 const JIMENG_LEGACY_IMAGE_MODELS = new Set(['jimeng-image-2k', 'jimeng-image-4k']);
 const JIMENG_LEGACY_VIDEO_MODELS = new Set(['jimeng-video-720p', 'jimeng-video-1080p']);
 const CODEX_DEFAULT_IMAGE_MODELS = ['gpt-image-2'];
@@ -186,13 +186,13 @@ const RECOMMENDED_APIS = [
         category:'value',
         base_url:'https://www.fhl.mom',
         protocol:'openai',
-        // FHL 生图当前走 OpenAI Images 协议：文生图 /v1/images/generations，图生图 /v1/images/edits
-        image_request_mode:'openai',
+        // FHL 生图走 OpenAI Responses / image_generation，避免 edits 长任务返回半截 keepalive。
+        image_request_mode:'openai-responses',
         register_url:'https://www.fhl.mom/register?aff=86L574B4T2N9',
         tagKeys:['Codex','Claude','api.tagGptImage2'],
         icons:['CODEX','GPT','IMG'],
         summaryKey:'api.recommendFhlSummary',
-        advantages:['稳定便宜接入 codex/Claude/GPT Image 2出图', 'OpenAI Images 生图直连', '预填 gpt-image-2 全系模型'],
+        advantages:['稳定便宜接入 codex/Claude/GPT Image 2出图', 'OpenAI RS 生图直连', '预填 gpt-image-2 全系模型'],
         image_models:['gpt-image-2', 'gpt-image-2-2k', 'gpt-image-2-4k', 'nano-banana'],
         chat_models:['gpt-5.5'],
         video_models:[]

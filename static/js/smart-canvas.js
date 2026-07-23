@@ -2095,6 +2095,13 @@ function screenToWorld(event){
         y:(event.clientY - rect.top - viewport.y) / viewport.scale
     };
 }
+function canvasWheelZoomFactor(event, pageSize){
+    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? pageSize : 1;
+    const isMac = /^Mac/.test(navigator.platform || '');
+    const sensitivity = 0.0008;
+    const macMultiplier = isMac ? 1.15 : 1;
+    return Math.exp(-event.deltaY * unit * sensitivity * macMultiplier);
+}
 function viewportCenter(){
     return {
         x:(shell.clientWidth / 2 - viewport.x) / viewport.scale,
@@ -2425,12 +2432,12 @@ function syncJimengModelPillForRefs(){
     try { scheduleDynamicParamsRefresh(80); } finally { _jimengModelRefreshing = false; }
 }
 // 即梦各视频指令支持的模型集合不同，按当前参考素材推断指令并过滤模型下拉。
-const JIMENG_SEEDANCE_VIDEO_MODELS = ['seedance2.0_vip', 'seedance2.0fast_vip', 'seedance2.0', 'seedance2.0fast'];
+const JIMENG_SEEDANCE_VIDEO_MODELS = ['seedance2.0_vip', 'seedance2.0fast_vip', 'seedance2.0', 'seedance2.0fast', 'seedance2.0mini'];
 const JIMENG_VIDEO_MODELS_BY_COMMAND = {
     text2video: JIMENG_SEEDANCE_VIDEO_MODELS,
     multimodal2video: JIMENG_SEEDANCE_VIDEO_MODELS,
-    image2video: ['3.0', '3.0fast', '3.0pro', '3.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
-    frames2video: ['3.0', '3.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
+    image2video: ['seedance1.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
+    frames2video: ['seedance1.5pro', ...JIMENG_SEEDANCE_VIDEO_MODELS],
 };
 function jimengVideoCommand(){
     const node = activeComposerNode() || selectedNode();
@@ -2510,7 +2517,11 @@ function videoProviderById(providerId){
 function providerVideoModels(providerId){
     if(providerId === 'volcengine') return volcengineVideoModels();
     const provider = videoApiProviders().find(p => p.id === providerId);
-    const models = provider?.video_models || DEFAULT_VIDEO_MODELS;
+    // API 设置页与画布页各自维护一份前端状态；即梦 CLI 的模型集合是本地固定能力，
+    // 因此节点侧要把已拉取列表与当前 CLI 支持列表合并，避免旧缓存漏掉新模型。
+    const models = providerId === 'jimeng'
+        ? [...(provider?.video_models || []), ...JIMENG_SEEDANCE_VIDEO_MODELS]
+        : (provider?.video_models || DEFAULT_VIDEO_MODELS);
     return [...new Set(models)];
 }
 function volcengineVideoModels(){
@@ -2575,7 +2586,7 @@ function renderVideoAspectControl(){
     </div>`;
 }
 function renderVideoResolutionControl(){
-    const options = [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P']];
+    const options = [['', tr('smart.videoResAuto')], ['720p','720P'], ['1080p','1080P'], ['4k','4K']];
     const value = settings.videoResolution || '';
     const labelMap = Object.fromEntries(options);
     return `<div class="smart-control resolution-control">
@@ -6888,6 +6899,46 @@ function openSmartLogLightbox(url, kind='image'){
 function smartLogPreviewNode(url, kind='image'){
     openSmartLogLightbox(url, kind);
 }
+async function deleteCanvasLogEntry(logId, deleteMedia=false){
+    if(!canvas || !canvasId || !logId) return;
+    const confirmText = deleteMedia ? tr('canvas.deleteLogMediaConfirm') : tr('canvas.deleteLogConfirm');
+    if(!confirm(confirmText)) return;
+    try {
+        if(saveTimer){
+            clearTimeout(saveTimer);
+            saveTimer = null;
+            await saveCanvas();
+        }
+        const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}/logs/delete`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                log_id:logId,
+                delete_unreferenced_media:deleteMedia,
+                reset_referencing_nodes:deleteMedia,
+                base_updated_at:Number(canvas.updated_at || 0)
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || tr('canvas.logDeleteFailed'));
+        canvas.logs = data.canvas?.logs || (canvas.logs || []).filter(item => item.id !== logId);
+        if(data.canvas?.nodes){
+            canvas.nodes = data.canvas.nodes;
+            canvas.connections = data.canvas.connections || [];
+            nodes = canvas.nodes;
+            render();
+        }
+        canvas.updated_at = Number(data.canvas?.updated_at || canvas.updated_at || Date.now());
+        renderSmartCanvasLog();
+        const notes = [tr('canvas.logDeleted')];
+        if(data.removed_files?.length) notes.push(tr('canvas.logMediaRemoved').replace('{n}', data.removed_files.length));
+        if(data.reset_node_ids?.length) notes.push(tr('canvas.logNodesReset').replace('{n}', data.reset_node_ids.length));
+        if(data.skipped_referenced?.length) notes.push(tr('canvas.logMediaReferenced').replace('{n}', data.skipped_referenced.length));
+        toast(notes.join(' · '));
+    } catch(err) {
+        toast(err?.message || tr('canvas.logDeleteFailed'));
+    }
+}
 function renderSmartCanvasLog(){
     const logs = canvas?.logs || [];
     smartLogList.innerHTML = logs.length ? logs.map(log => {
@@ -6911,7 +6962,7 @@ function renderSmartCanvasLog(){
             taskId ? `ID ${taskId}` : '',
             backend
         ].filter(Boolean);
-        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}">
+        return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}" data-canvas-log-id="${escapeAttr(log.id || '')}">
             <div class="log-main">
                 <div class="log-meta">
                     <span class="log-chip ${log.status === 'failed' ? 'status-failed' : 'status-ok'}">${escapeHtml(log.status === 'failed' ? tr('canvas.failed') : tr('canvas.success'))}</span>
@@ -6922,6 +6973,10 @@ function renderSmartCanvasLog(){
                 <div class="log-subline">${subParts.map(part => `<span title="${escapeAttr(part)}">${escapeHtml(part)}</span>`).join('')}</div>
                 ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
                 <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
+                <div class="log-actions">
+                    <button type="button" data-log-delete="record"><i data-lucide="list-x"></i><span>${escapeHtml(tr('canvas.deleteLog'))}</span></button>
+                    <button type="button" class="danger" data-log-delete="media"><i data-lucide="trash-2"></i><span>${escapeHtml(tr('canvas.deleteLogAndMedia'))}</span></button>
+                </div>
             </div>
             <div class="log-thumbs">${thumbs}</div>
         </div>`;
@@ -6951,6 +7006,13 @@ function renderSmartCanvasLog(){
     };
     bindLogCopy('[data-prompt]', 'prompt');
     bindLogCopy('[data-error]', 'error');
+    smartLogList.querySelectorAll('[data-log-delete]').forEach(button => {
+        button.onclick = e => {
+            e.stopPropagation();
+            const logId = button.closest('[data-canvas-log-id]')?.dataset.canvasLogId || '';
+            deleteCanvasLogEntry(logId, button.dataset.logDelete === 'media');
+        };
+    });
     refreshIcons();
 }
 function openSmartCanvasLog(){
@@ -13968,7 +14030,11 @@ async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
         if(!imageRefs.length) throw new Error(tr('smart.errEnhanceNeedRefs'));
         const inputName = await comfyNameForRef(imageRefs[0]);
         const data = await runQueuedSmartComfyGenerate({workflow_json:'Z-Image-Enhance.json', type:'enhance', params:{"15":{image:inputName},"204":{value:Number(runSettings.enhanceStrength ?? 0.5)}}, client_id:smartClientId});
-        const urls = resultMediaUrls(data);
+        let urls = resultMediaUrls(data);
+        if(runSettings.enhanceUpscale && urls[0]){
+            const upscale = await runSmartComfyUpscale(urls[0], runSettings.enhanceUpscaleRes || 2048);
+            urls = resultMediaUrls(upscale);
+        }
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
     if(mode === 'edit'){
@@ -13976,7 +14042,11 @@ async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
         const names = [];
         for(const ref of imageRefs.slice(0, 3)) names.push(await comfyNameForRef(ref));
         const data = await runQueuedSmartComfyGenerate({prompt, workflow_json:'Flux2-Klein.json', type:'klein', params:{"168":{text:prompt},"158":{noise_seed:Math.floor(Math.random()*1000000)},"278":{image:names[0] || ""},"270":{image:names[1] || ""},"292":{image:names[2] || ""},"313":{value:Boolean(names[1])},"314":{value:Boolean(names[2])}}, client_id:smartClientId});
-        const urls = resultMediaUrls(data);
+        let urls = resultMediaUrls(data);
+        if(runSettings.editUpscale && urls[0]){
+            const upscale = await runSmartComfyUpscale(urls[0], runSettings.editUpscaleRes || 2048);
+            urls = resultMediaUrls(upscale);
+        }
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
     const workflowName = runSettings.comfyWorkflow || comfyWorkflows[0]?.name || '';
@@ -14893,6 +14963,19 @@ async function urlToBase64(url){
     });
 }
 function sleep(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
+async function runSmartComfyUpscale(imageUrl, resolution){
+    if(!imageUrl) throw new Error(tr('smart.errRunFailed'));
+    const inputName = await comfyNameForRef({url:imageUrl, name:'smart-upscale-input.png'});
+    return runQueuedSmartComfyGenerate({
+        workflow_json:'upscale.json',
+        params:{
+            "15":{image:inputName},
+            "172":{seed:Math.floor(Math.random() * 4294967295), resolution:Number(resolution || 2048)}
+        },
+        type:'enhance',
+        client_id:smartClientId
+    });
+}
 async function runComfyGeneration(node, prompt, refs, pendingNode, meta){
     const allRefs = refs || [];
     refs = imageRefsOnly(allRefs);
@@ -14962,7 +15045,12 @@ async function runComfyEnhance(node, refs, pendingNode, meta){
     if(!refs.length) throw new Error(tr('smart.errEnhanceNeedRefs'));
     const inputName = await comfyNameForRef(refs[0]);
     const data = await runQueuedSmartComfyGenerate({workflow_json:'Z-Image-Enhance.json', type:'enhance', params:{"15":{image:inputName},"204":{value:Number(settings.enhanceStrength ?? 0.5)}}, client_id:smartClientId});
-    const out = data.outputs || data.images || [];
+    //修复超分勾选
+    let out = data.outputs || data.images || [];
+    if(settings.enhanceUpscale && out[0]){
+        const upscale = await runSmartComfyUpscale(out[0], settings.enhanceUpscaleRes || 2048);
+        out = upscale.outputs || upscale.images || [];
+    }
     if(!out.length) throw new Error(tr('smart.errComfyNoImages'));
     if(pendingNode){
         finalizePendingNode(pendingNode, out, meta);
@@ -14978,7 +15066,12 @@ async function runComfyEdit(node, prompt, refs, pendingNode, meta){
     const names = [];
     for(const ref of refs.slice(0, 3)) names.push(await comfyNameForRef(ref));
     const data = await runQueuedSmartComfyGenerate({prompt, workflow_json:'Flux2-Klein.json', type:'klein', params:{"168":{text:prompt},"158":{noise_seed:Math.floor(Math.random()*1000000)},"278":{image:names[0] || ""},"270":{image:names[1] || ""},"292":{image:names[2] || ""},"313":{value:Boolean(names[1])},"314":{value:Boolean(names[2])}}, client_id:smartClientId});
-    const out = data.outputs || data.images || [];
+    //修复超分勾选
+    let out = data.outputs || data.images || [];
+    if(settings.editUpscale && out[0]){
+        const upscale = await runSmartComfyUpscale(out[0], settings.editUpscaleRes || 2048);
+        out = upscale.outputs || upscale.images || [];
+    }
     if(!out.length) throw new Error(tr('smart.errComfyNoImages'));
     if(pendingNode){
         finalizePendingNode(pendingNode, out, meta);
@@ -16316,7 +16409,7 @@ shell.addEventListener('wheel', e => {
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const before = {x:(sx - viewport.x) / viewport.scale, y:(sy - viewport.y) / viewport.scale};
-    const factor = Math.exp(-e.deltaY * 0.001);
+    const factor = canvasWheelZoomFactor(e, shell.clientHeight || window.innerHeight || 800);
     viewport.scale = safeScale(viewport.scale * factor);
     viewport.x = sx - before.x * viewport.scale;
     viewport.y = sy - before.y * viewport.scale;
