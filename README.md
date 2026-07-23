@@ -7,15 +7,14 @@ Supports comfyui/API calls/modelscope calls
 
 > 本仓库是基于原项目 [hero8152/Infinite-Canvas](https://github.com/hero8152/Infinite-Canvas) 的二次开发 fork，新增了智能画布 AI Agent 面板。
 >
-> **当前版本：v2.0**（查看 [版本更新大纲](./CHANGELOG.md)）
+> **当前版本：v2.1**（查看 [版本更新大纲](./CHANGELOG.md)）
 
 ### 重要提示
-- **已关闭自动更新**：导航栏版本号显示为「Agent版(无自动更新)」。若从上游拉取/合并最新代码，可能覆盖本分支的 AI Agent 功能，请谨慎操作并先备份。
-- **main 分支与上游分叉**：本 fork 的 `main` 通过强制推送覆盖，历史与上游不一致，切勿直接向上游发起合并。
+- **自动更新已开启**：更新源指向主项目 [hero8152/Infinite-Canvas](https://github.com/hero8152/Infinite-Canvas)，导航栏会自动检测并提示新版本。
 - **禁止商业用途**：沿用原作者版权声明（见文末），二次开发须保持开源并注明来源作者。
 - **不要提交 API Key到仓库**：请在软件自带的「API 设置」界面填写 Key/URL，不要写入代码或提交到仓库（`.gitignore` 已排除敏感文件与运行时数据）。
 
-> This fork adds an AI Agent panel to the canvas. Auto-update is disabled; pulling upstream changes may overwrite the Agent features. The `main` branch was force-pushed and diverges from upstream. Do not commit API keys. Commercial use remains prohibited.
+> This fork adds an AI Agent panel to the canvas. Auto-update is enabled and points to the main project hero8152/Infinite-Canvas. Do not commit API keys. Commercial use remains prohibited.
 
 ### 版本更新日志
 

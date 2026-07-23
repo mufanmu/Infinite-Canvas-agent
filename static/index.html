@@ -23,11 +23,11 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=v2.0.1784282603"></script>
-    <script src="/static/js/theme.js?v=v2.0.1784282603"></script>
-    <script src="/static/js/i18n.js?v=v2.0.1784282603"></script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=v2.1.1784282603"></script>
+    <script src="/static/js/theme.js?v=v2.1.1784282603"></script>
+    <script src="/static/js/i18n.js?v=v2.1.1784282603"></script>
     <style>
-        @import url('/static/vendor/css/fonts.css?v=v2.0.1784282603');
+        @import url('/static/vendor/css/fonts.css?v=v2.1.1784282603');
 
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -1621,7 +1621,7 @@
                     </svg>
                     <span id="update-now-text" class="update-now-text" data-i18n="update.oneClick">一键更新</span>
                 </button>
-                <div id="project-version-badge" class="project-version-badge">Agent版(无自动更新)</div>
+                <div id="project-version-badge" class="project-version-badge">Agent版</div>
             </div>
 
             <div class="author-box">
@@ -1672,16 +1672,16 @@
         </script>
 
         <main class="stage">
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=v2.0.1784686770" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=v2.0.1784686770" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=v2.0.1784686770" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=v2.0.1784686770" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=v2.0.1784686770" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=v2.0.1784686770" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=v2.0.1784686770" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=v2.0.1784686770" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=v2.0.1784686770" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=v2.0.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=v2.1.1784686770" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-enhance" data-src="/static/enhance.html?v=v2.1.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=v2.1.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-angle" data-src="/static/angle.html?v=v2.1.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=v2.1.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=v2.1.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=v2.1.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=v2.1.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=v2.1.1784686770" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=v2.1.1784686770" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -1791,7 +1791,7 @@
         const DEFAULT_PAGE_ID = 'zimage';
         const PAGE_IDS = ['zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
         const LOCAL_PAGE_IDS = ['zimage','enhance','klein','angle'];
-        const PROJECT_URL = 'https://github.com/mufanmu/Infinite-Canvas-agent/tree/feature/ai-agent-panel';
+        const PROJECT_URL = 'https://github.com/hero8152/Infinite-Canvas';
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'' };
         let updateConnectivityResult = null;
         let projectUpdateRunning = false;
@@ -2100,7 +2100,7 @@
                 sidebar.addEventListener('mouseenter', () => pauseScaleInFrames());
                 sidebar.addEventListener('mouseleave', () => pauseScaleInFrames());
             }
-            // checkForUpdates(); // 已禁用自动更新检查
+            checkForUpdates(); // 自动更新检查
         });
 
         // sync theme when iframe loads
@@ -2742,13 +2742,6 @@
         window.rollbackProjectUpdate = rollbackProjectUpdate;
 
         async function checkForUpdates(manual = false) {
-            // 已禁用更新检查，只显示版本号
-            try {
-                const info = await fetch('/api/app-info', { cache:'no-store' }).then(r => r.json()).catch(() => ({}));
-                appInfo = {...appInfo, ...info};
-                setProjectVersionBadge(String(appInfo.version || '').trim());
-            } catch(e) {}
-            return;
             const isEn = window.StudioI18n?.lang?.() === 'en';
             const badge = document.getElementById('project-version-badge');
             if(manual && badge) badge.classList.add('checking');
